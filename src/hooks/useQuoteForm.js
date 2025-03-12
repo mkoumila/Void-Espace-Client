@@ -43,9 +43,9 @@ export function useQuoteForm() {
         setClients(data || []);
         
         // Set default client if available
-        if (data && data.length > 0) {
+        /* if (data && data.length > 0) {
           setFormData(prev => ({ ...prev, client_id: data[0].id }));
-        }
+        } */
       } catch (err) {
         setError(`Une erreur est survenue: ${err.message}`);
       }
