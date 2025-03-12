@@ -1,0 +1,6 @@
+npm create vite@latest void-client-portal -- --template react
+cd void-client-portal
+npm install -D tailwindcss postcss autoprefixer
+npm install @heroicons/react react-router-dom
+npm install @headlessui/react
+npx tailwindcss init -p 

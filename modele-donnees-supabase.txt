@@ -1,0 +1,209 @@
+MODÈLE DE DONNÉES POUR SUPABASE
+============================
+
+Ce document décrit le modèle de données à utiliser pour l'application dans Supabase.
+
+1. TABLES PRINCIPALES
+--------------------
+
+### Utilisateurs (auth.users)
+Utilisation de la table auth.users native de Supabase pour l'authentification et la gestion des utilisateurs.
+- id: UUID unique généré par Supabase (PK)
+- email: Adresse email (obligatoire, unique)
+- phone: Numéro de téléphone (optionnel)
+- created_at: Date et heure de création
+- updated_at: Date et heure de mise à jour
+- last_sign_in_at: Date et heure de la dernière connexion
+- ... autres champs gérés par Supabase Auth
+
+### user_profiles
+Table d'extension des profils utilisateurs.
+- id: UUID unique (PK, correspond à auth.users.id)
+- name: Nom complet (obligatoire)
+- company: Entreprise
+- department: Département au sein de l'entreprise
+- position: Poste occupé
+- role: Rôle (Client, Administrateur, Gestionnaire)
+- status: Statut (active, inactive)
+- created_at: Date et heure de création
+- updated_at: Date et heure de mise à jour
+
+### user_addresses
+Table des adresses des utilisateurs.
+- id: SERIAL PRIMARY KEY
+- user_id: Référence à l'utilisateur (FK → auth.users.id)
+- street: Rue
+- city: Ville
+- postal_code: Code postal
+- country: Pays
+- is_primary: Indique si c'est l'adresse principale
+- created_at: Date et heure de création
+- updated_at: Date et heure de mise à jour
+
+### projects
+Table des projets.
+- id: SERIAL PRIMARY KEY
+- name: Nom du projet (obligatoire)
+- description: Description détaillée
+- start_date: Date de début
+- end_date: Date de fin prévue
+- status: Statut (planning, in_progress, completed, on_hold)
+- progress: Pourcentage d'avancement (0-100)
+- budget: Budget total
+- manager: Nom du responsable
+- created_at: Date et heure de création
+- updated_at: Date et heure de mise à jour
+
+### project_users
+Table de liaison entre projets et utilisateurs.
+- id: SERIAL PRIMARY KEY
+- project_id: Référence au projet (FK → projects.id)
+- user_id: Référence à l'utilisateur (FK → auth.users.id)
+- role: Rôle dans le projet (owner, manager, member)
+- created_at: Date et heure de création
+Note: Contrainte d'unicité sur (project_id, user_id)
+
+### documents
+Table des documents et PVs.
+- id: SERIAL PRIMARY KEY
+- title: Titre du document (obligatoire)
+- type: Type de document (pv, contract, specification, proposal)
+- date: Date d'émission
+- project: Nom du projet (champ texte, pas de relation avec la table projects)
+- project_id: Identifiant du projet (optionnel, pour référence uniquement, pas de contrainte de clé étrangère)
+- assigned_user: Référence à l'utilisateur (FK → auth.users.id)
+- status: Statut (pending, signed, rejected)
+- signed_at: Date et heure de signature
+- file_path: Chemin du fichier dans le bucket Supabase Storage
+- signed_file_path: Chemin du fichier signé dans le bucket Supabase Storage
+- transferred_to_name: Nom de la personne à qui le document a été transféré
+- transferred_to_email: Email de la personne à qui le document a été transféré
+- created_at: Date et heure de création
+- updated_at: Date et heure de mise à jour
+
+### reminders
+Table des rappels envoyés pour les documents.
+- id: SERIAL PRIMARY KEY
+- document_id: Référence au document (FK → documents.id)
+- type: Type de rappel (email, sms)
+- date: Date et heure d'envoi
+- content: Contenu du message
+- created_at: Date et heure de création
+
+### payments
+Table des paiements et factures.
+- id: SERIAL PRIMARY KEY
+- invoice: Numéro de facture (obligatoire)
+- amount: Montant (obligatoire)
+- date: Date d'émission (obligatoire)
+- due_date: Date d'échéance (obligatoire)
+- status: Statut (pending, paid, overdue)
+- paid_at: Date et heure du paiement
+- project: Nom du projet (champ texte, pas de relation avec la table projects)
+- project_id: Identifiant du projet (optionnel, pour référence uniquement, pas de contrainte de clé étrangère)
+- assigned_user: Référence à l'utilisateur (FK → auth.users.id)
+- file_path: Chemin du fichier de facture dans le bucket Supabase Storage
+- created_at: Date et heure de création
+- updated_at: Date et heure de mise à jour
+
+### quotes
+Table des devis.
+- id: SERIAL PRIMARY KEY
+- reference: Référence du devis (obligatoire)
+- title: Titre du devis (obligatoire)
+- amount: Montant (obligatoire)
+- date: Date d'émission (obligatoire)
+- valid_until: Date de validité (obligatoire)
+- status: Statut (pending, accepted, rejected, expired)
+- accepted_at: Date et heure d'acceptation
+- rejected_at: Date et heure de refus
+- file_path: Chemin du fichier de devis dans le bucket Supabase Storage
+- project: Nom du projet (champ texte, pas de relation avec la table projects)
+- project_id: Identifiant du projet (optionnel, pour référence uniquement, pas de contrainte de clé étrangère)
+- assigned_user: Référence à l'utilisateur (FK → auth.users.id)
+- created_at: Date et heure de création
+- updated_at: Date et heure de mise à jour
+
+### settings
+Table des paramètres de l'application.
+- id: SERIAL PRIMARY KEY
+- key: Clé du paramètre (obligatoire, unique)
+- value: Valeur du paramètre (format JSON)
+- description: Description du paramètre
+- created_at: Date et heure de création
+- updated_at: Date et heure de mise à jour
+
+### email_templates
+Table des modèles d'emails.
+- id: SERIAL PRIMARY KEY
+- name: Nom du modèle (obligatoire)
+- subject: Sujet de l'email (obligatoire)
+- body: Corps de l'email (obligatoire)
+- category: Catégorie (reminder, welcome, notification)
+- created_at: Date et heure de création
+- updated_at: Date et heure de mise à jour
+
+2. RELATIONS
+-----------
+
+- Un utilisateur peut avoir plusieurs adresses (one-to-many)
+- Un utilisateur peut être associé à plusieurs projets (many-to-many via project_users)
+- Un projet peut avoir plusieurs utilisateurs (many-to-many via project_users)
+- Un utilisateur peut avoir plusieurs documents assignés (one-to-many)
+- Un document peut avoir plusieurs rappels (one-to-many)
+- Un utilisateur peut avoir plusieurs paiements assignés (one-to-many)
+- Un utilisateur peut avoir plusieurs devis assignés (one-to-many)
+
+Note: Les documents, paiements et devis ne sont pas directement liés aux projets par des contraintes de clé étrangère. 
+Le champ "project" dans ces tables est simplement un champ texte pour stocker le nom du projet, et le champ "project_id" 
+est un identifiant optionnel pour référence uniquement, sans contrainte d'intégrité référentielle.
+
+3. STOCKAGE DES FICHIERS
+-----------------------
+
+Tous les fichiers (documents, factures, devis) seront stockés dans des buckets Supabase Storage:
+
+- documents/ : Bucket pour les documents et PVs
+  - original/ : Dossier pour les fichiers originaux
+  - signed/ : Dossier pour les fichiers signés
+
+- invoices/ : Bucket pour les factures
+
+- quotes/ : Bucket pour les devis
+
+Les chemins des fichiers seront stockés dans les champs file_path, signed_file_path, etc. des tables correspondantes.
+
+4. INDEXES
+---------
+
+Des index sont créés pour optimiser les requêtes fréquentes :
+- Index sur user_profiles.id (correspondant à auth.users.id)
+- Index sur documents.assigned_user, documents.status, documents.type
+- Index sur payments.assigned_user, payments.status
+- Index sur quotes.assigned_user, quotes.status
+- Index sur reminders.document_id
+- Index unique sur project_users(project_id, user_id)
+
+5. NOTES D'IMPLÉMENTATION
+------------------------
+
+- Utilisation de auth.users de Supabase pour l'authentification et la gestion des utilisateurs
+- Table user_profiles pour étendre les informations des utilisateurs
+- Toutes les tables incluent des champs created_at et updated_at pour suivre les modifications
+- Les relations sont définies avec des contraintes de clé étrangère appropriées, sauf pour les références aux projets dans les tables documents, payments et quotes
+- Les suppressions en cascade sont utilisées lorsque cela est logique (par exemple, supprimer les adresses d'un utilisateur lorsque l'utilisateur est supprimé)
+- Les champs de type date utilisent timestamp with time zone pour gérer correctement les fuseaux horaires
+- Les montants financiers utilisent le type numeric(10,2) pour une précision exacte
+- Les champs JSON utilisent le type jsonb pour de meilleures performances et fonctionnalités de requête
+- Les fichiers sont stockés dans des buckets Supabase Storage avec des chemins structurés
+
+6. CONSIDÉRATIONS POUR SUPABASE
+------------------------------
+
+- Utiliser le système d'authentification natif de Supabase (auth.users)
+- Implémenter RBAC (Role-Based Access Control) via les claims JWT et les politiques RLS
+- Configurer les politiques RLS (Row Level Security) pour contrôler l'accès aux données
+- Utiliser les fonctions et déclencheurs pour maintenir les champs updated_at
+- Configurer des webhooks pour les intégrations externes (par exemple, envoi d'emails lors de la création de rappels)
+- Configurer les buckets Supabase Storage avec les permissions appropriées
+- Utiliser les fonctions Edge Functions de Supabase pour les traitements côté serveur (comme la génération de PDF signés) 
