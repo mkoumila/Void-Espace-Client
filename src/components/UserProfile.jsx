@@ -69,7 +69,10 @@ const NotLoggedInState = () => (
 
 // User dropdown menu component
 const UserDropdownMenu = ({ userData, userRole, onLogout }) => {
-  const formattedRole = userRole === 'admin' ? 'Administrateur' : 'Client'
+  const formattedRole = 
+    userRole === 'admin' ? 'Administrateur' : 
+    userRole === 'gestionnaire' ? 'Gestionnaire' : 
+    'Client'
   
   return (
     <Menu as="div" className="relative w-full">

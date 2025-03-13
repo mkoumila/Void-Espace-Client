@@ -291,9 +291,13 @@ export function AuthProvider({ children }) {
       return userRole === 'admin';
     }
     
-    // Admin has all client permissions
+    if (requiredRole === 'gestionnaire') {
+      return userRole === 'gestionnaire' || userRole === 'admin';
+    }
+    
+    // Admin and gestionnaire have all client permissions
     if (requiredRole === 'client') {
-      return userRole === 'client' || userRole === 'admin';
+      return userRole === 'client' || userRole === 'gestionnaire' || userRole === 'admin';
     }
     
     return false;

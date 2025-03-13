@@ -10,7 +10,7 @@ CREATE EXTENSION IF NOT EXISTS "uuid-ossp";
 -- CREATE ENUMS FOR DROPDOWNS
 -- ==========================================
 -- Create ENUM type for user roles
-CREATE TYPE user_role AS ENUM ('admin', 'client');
+CREATE TYPE user_role AS ENUM ('admin', 'gestionnaire', 'client');
 CREATE TYPE project_status AS ENUM ('En cours', 'Terminé', 'En pause');
 CREATE TYPE quote_status AS ENUM ('En attente de validation', 'Validé', 'Expiré');
 CREATE TYPE payment_status AS ENUM ('En attente', 'Payé', 'Annulé');
@@ -271,19 +271,8 @@ ALTER TABLE tma ENABLE ROW LEVEL SECURITY;
 ALTER TABLE tma_activities ENABLE ROW LEVEL SECURITY;
 
 -- ==========================================
--- ROW LEVEL SECURITY POLICIES
+-- HELPER FUNCTIONS FOR RLS
 -- ==========================================
-
--- USERS TABLE POLICIES
--- Users can view and edit their own profile
-CREATE POLICY "Users can view their own profile"
-  ON users FOR SELECT
-  USING (auth.uid() = id);
-
-CREATE POLICY "Users can update their own profile"
-  ON users FOR UPDATE
-  USING (auth.uid() = id)
-  WITH CHECK (role = role); -- Prevent changing own role
 
 -- Fix for the infinite recursion - create a safe function to check admin role
 CREATE OR REPLACE FUNCTION is_admin() 
@@ -297,6 +286,34 @@ EXCEPTION WHEN OTHERS THEN
   RETURN FALSE;
 END;
 $$ LANGUAGE plpgsql SECURITY DEFINER;
+
+-- Function to check if user is gestionnaire or admin
+CREATE OR REPLACE FUNCTION is_gestionnaire_or_admin() 
+RETURNS BOOLEAN AS $$
+DECLARE
+  user_role user_role;
+BEGIN
+  SELECT role INTO user_role FROM users WHERE id = auth.uid();
+  RETURN user_role IN ('admin', 'gestionnaire');
+EXCEPTION WHEN OTHERS THEN
+  RETURN FALSE;
+END;
+$$ LANGUAGE plpgsql SECURITY DEFINER;
+
+-- ==========================================
+-- ROW LEVEL SECURITY POLICIES
+-- ==========================================
+
+-- USERS TABLE POLICIES
+-- Users can view and edit their own profile
+CREATE POLICY "Users can view their own profile"
+  ON users FOR SELECT
+  USING (auth.uid() = id);
+
+CREATE POLICY "Users can update their own profile"
+  ON users FOR UPDATE
+  USING (auth.uid() = id)
+  WITH CHECK (role = role); -- Prevent changing own role
 
 -- Admins can view and edit all users - policies rewritten to avoid recursion
 CREATE POLICY "Admins can view all users"
@@ -343,6 +360,19 @@ CREATE POLICY "Clients can view their own projects"
     WHERE clients.id = projects.client_id AND clients.user_id = auth.uid()
   ));
 
+-- Gestionnaires can view, create, and edit all projects
+CREATE POLICY "Gestionnaires can view all projects"
+  ON projects FOR SELECT
+  USING (is_gestionnaire_or_admin() = TRUE);
+
+CREATE POLICY "Gestionnaires can insert projects"
+  ON projects FOR INSERT
+  WITH CHECK (is_gestionnaire_or_admin() = TRUE);
+
+CREATE POLICY "Gestionnaires can update projects"
+  ON projects FOR UPDATE
+  USING (is_gestionnaire_or_admin() = TRUE);
+
 -- Admins can view, create, and edit all projects
 CREATE POLICY "Admins can view all projects"
   ON projects FOR SELECT
@@ -368,6 +398,19 @@ CREATE POLICY "Clients can view their own quotes"
     SELECT 1 FROM clients 
     WHERE clients.id = quotes.client_id AND clients.user_id = auth.uid()
   ));
+
+-- Gestionnaires can view, create, and edit all quotes
+CREATE POLICY "Gestionnaires can view all quotes"
+  ON quotes FOR SELECT
+  USING (is_gestionnaire_or_admin() = TRUE);
+
+CREATE POLICY "Gestionnaires can insert quotes"
+  ON quotes FOR INSERT
+  WITH CHECK (is_gestionnaire_or_admin() = TRUE);
+
+CREATE POLICY "Gestionnaires can update quotes"
+  ON quotes FOR UPDATE
+  USING (is_gestionnaire_or_admin() = TRUE);
 
 -- Admins can view, create, and edit all quotes
 CREATE POLICY "Admins can view all quotes"
@@ -476,6 +519,19 @@ CREATE POLICY "Clients can view their own TMAs"
     WHERE clients.id = tma.client_id AND clients.user_id = auth.uid()
   ));
 
+-- Gestionnaires can view, create, and edit all TMAs
+CREATE POLICY "Gestionnaires can view all TMAs"
+  ON tma FOR SELECT
+  USING (is_gestionnaire_or_admin() = TRUE);
+
+CREATE POLICY "Gestionnaires can insert TMAs"
+  ON tma FOR INSERT
+  WITH CHECK (is_gestionnaire_or_admin() = TRUE);
+
+CREATE POLICY "Gestionnaires can update TMAs"
+  ON tma FOR UPDATE
+  USING (is_gestionnaire_or_admin() = TRUE);
+
 -- Admins can view, create, and edit all TMAs
 CREATE POLICY "Admins can view all TMAs"
   ON tma FOR SELECT
@@ -502,6 +558,19 @@ CREATE POLICY "Clients can view their own TMA activities"
     JOIN clients ON tma.client_id = clients.id
     WHERE tma.id = tma_activities.tma_id AND clients.user_id = auth.uid()
   ));
+
+-- Gestionnaires can view, create, and edit all TMA activities
+CREATE POLICY "Gestionnaires can view all TMA activities"
+  ON tma_activities FOR SELECT
+  USING (is_gestionnaire_or_admin() = TRUE);
+
+CREATE POLICY "Gestionnaires can insert TMA activities"
+  ON tma_activities FOR INSERT
+  WITH CHECK (is_gestionnaire_or_admin() = TRUE);
+
+CREATE POLICY "Gestionnaires can update TMA activities"
+  ON tma_activities FOR UPDATE
+  USING (is_gestionnaire_or_admin() = TRUE);
 
 -- Admins can view, create, and edit all TMA activities
 CREATE POLICY "Admins can view all TMA activities"
@@ -587,11 +656,11 @@ CREATE POLICY "Anyone authenticated can view files from project_files"
     bucket_id = 'project_files' AND auth.role() = 'authenticated'
   );
 
-CREATE POLICY "Admins can upload files to project_files"
+CREATE POLICY "Admins and gestionnaires can upload files to project_files"
   ON storage.objects FOR INSERT
   WITH CHECK (
     bucket_id = 'project_files'
-    AND is_admin() = TRUE
+    AND (is_admin() = TRUE OR is_gestionnaire_or_admin() = TRUE)
   );
 
 CREATE POLICY "Admins can update files in project_files"

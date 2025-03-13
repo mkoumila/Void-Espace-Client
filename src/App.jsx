@@ -64,6 +64,11 @@ function App() {
               <Route path="/payments" element={<Payments />} />
               <Route path="/quotes" element={<Quotes />} />
               
+              {/* Gestionnaire routes - require gestionnaire role */}
+              <Route element={<ProtectedRoute requiredRole="gestionnaire" />}>
+                <Route path="/quotes/add" element={<AddQuote />} />
+              </Route>
+              
               {/* Admin routes - require admin role */}
               <Route element={<ProtectedRoute requiredRole="admin" />}>
                 <Route path="/admin" element={<AdminDashboard />} />
@@ -73,7 +78,6 @@ function App() {
                 <Route path="/admin/users/:userId/quotes" element={<UserQuotes />} />
                 <Route path="/admin/users/:userId/projects" element={<UserProjects />} />
                 <Route path="/admin/settings" element={<AdminSettings />} />
-                <Route path="/quotes/add" element={<AddQuote />} />
               </Route>
             </Route>
           </Route>
