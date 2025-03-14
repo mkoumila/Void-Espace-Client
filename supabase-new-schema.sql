@@ -816,6 +816,117 @@ BEGIN
 END;
 $$ LANGUAGE plpgsql;
 
+-- Function to automatically mark quotes as expired when valid_until date passes
+CREATE OR REPLACE FUNCTION check_quote_expiration()
+RETURNS TRIGGER AS $$
+BEGIN
+  -- If the quote is still awaiting validation and has expired
+  IF NEW.status = 'En attente de validation' AND NEW.valid_until < CURRENT_DATE THEN
+    NEW.status = 'Expiré';
+  END IF;
+  
+  RETURN NEW;
+END;
+$$ LANGUAGE plpgsql;
+
+-- Trigger to check quote expiration on update or insert
+CREATE TRIGGER check_quote_expiration
+BEFORE INSERT OR UPDATE ON quotes
+FOR EACH ROW
+EXECUTE FUNCTION check_quote_expiration();
+
+-- Function to manually update expired quotes (can be run as a scheduled job)
+CREATE OR REPLACE FUNCTION update_expired_quotes()
+RETURNS integer AS $$
+DECLARE
+  updated_count integer;
+BEGIN
+  UPDATE quotes
+  SET status = 'Expiré',
+      updated_at = NOW()
+  WHERE status = 'En attente de validation'
+  AND valid_until < CURRENT_DATE;
+  
+  GET DIAGNOSTICS updated_count = ROW_COUNT;
+  RETURN updated_count;
+END;
+$$ LANGUAGE plpgsql SECURITY DEFINER;
+
+-- Grant execute permission to authenticated users
+GRANT EXECUTE ON FUNCTION update_expired_quotes() TO authenticated;
+
+-- Function to create authentication audit log view for user login tracking
+CREATE OR REPLACE FUNCTION public.create_auth_audit_log_view()
+RETURNS void AS $$
+BEGIN
+  -- Create the view if it doesn't exist
+  CREATE OR REPLACE VIEW auth_audit_log_view AS
+  SELECT
+    -- User ID is in actor_id field in the Supabase audit logs
+    (payload->>'actor_id')::uuid AS user_id,
+    payload->>'action' AS event_type,
+    created_at AS timestamp,
+    payload AS full_payload,
+    -- Email is in actor_username field
+    payload->>'actor_username' AS email
+  FROM
+    auth.audit_log_entries
+  WHERE
+    payload->>'action' IN ('login', 'signup', 'token_refreshed');
+    
+  -- Grant permissions to authenticated users
+  GRANT SELECT ON auth_audit_log_view TO authenticated;
+END;
+$$ LANGUAGE plpgsql SECURITY DEFINER;
+
+-- Grant execute permission to authenticated users
+GRANT EXECUTE ON FUNCTION public.create_auth_audit_log_view() TO authenticated;
+
+-- Comment describing the function
+COMMENT ON FUNCTION public.create_auth_audit_log_view() IS 'Creates a view to access auth audit logs for tracking user login history';
+
+-- Debug function to explore audit log structure
+CREATE OR REPLACE FUNCTION public.debug_audit_logs()
+RETURNS json AS $$
+DECLARE
+  sample_row RECORD;
+  result json;
+BEGIN
+  -- Get a sample row
+  SELECT * INTO sample_row FROM auth.audit_log_entries 
+  WHERE payload->>'action' = 'login'
+  ORDER BY created_at DESC
+  LIMIT 1;
+  
+  -- No rows found
+  IF sample_row IS NULL THEN
+    RETURN json_build_object('error', 'No login audit logs found');
+  END IF;
+  
+  -- Build response with all potentially useful fields
+  result := json_build_object(
+    'id', sample_row.id,
+    'schema', 'auth',
+    'table', 'audit_log_entries',
+    'record', json_build_object(
+      'id', sample_row.id,
+      'payload', sample_row.payload,
+      'created_at', sample_row.created_at,
+      'payload_keys', (SELECT array_agg(key) FROM jsonb_object_keys(sample_row.payload) AS key),
+      'auth_uid_direct', auth.uid()
+    )
+  );
+  
+  RETURN result;
+END;
+$$ LANGUAGE plpgsql SECURITY DEFINER;
+
+-- Grant execute permission to authenticated users
+GRANT EXECUTE ON FUNCTION public.debug_audit_logs() TO authenticated;
+
+-- Execute the function to create the view immediately
+SELECT create_auth_audit_log_view();
+
 -- Function to validate a quote (for client usage)
 CREATE OR REPLACE FUNCTION validate_quote(quote_id UUID) 
 RETURNS BOOLEAN AS $$
@@ -823,14 +934,44 @@ DECLARE
   client_user_id UUID;
   quote_client_id UUID;
   quote_status quote_status;
+  current_user_id UUID;
+  user_role TEXT;
+  log_message TEXT;
 BEGIN
-  -- Get the client ID and status for the quote
+  -- Get current authenticated user
+  current_user_id := auth.uid();
+  
+  -- Get user's role
+  SELECT role::TEXT INTO user_role
+  FROM users
+  WHERE id = current_user_id;
+  
+  -- Add logging for debugging
+  RAISE LOG 'validate_quote: Started with quote_id=%, user=%, role=%', 
+    quote_id, current_user_id, user_role;
+  
+  -- Exit early if no authenticated user
+  IF current_user_id IS NULL THEN
+    RAISE LOG 'validate_quote: No authenticated user found';
+    RETURN FALSE;
+  END IF;
+  
+  -- Get the quote information
   SELECT client_id, status INTO quote_client_id, quote_status
   FROM quotes
   WHERE id = quote_id;
   
-  -- If quote not found or already validated
-  IF quote_client_id IS NULL OR quote_status != 'En attente de validation' THEN
+  -- Logging
+  RAISE LOG 'validate_quote: Quote info - client_id=%, status=%', quote_client_id, quote_status;
+  
+  -- Exit if quote not found or not in pending status
+  IF quote_client_id IS NULL THEN
+    RAISE LOG 'validate_quote: Quote not found';
+    RETURN FALSE;
+  END IF;
+  
+  IF quote_status != 'En attente de validation' THEN
+    RAISE LOG 'validate_quote: Quote status is not pending: %', quote_status;
     RETURN FALSE;
   END IF;
   
@@ -839,20 +980,122 @@ BEGIN
   FROM clients
   WHERE id = quote_client_id;
   
-  -- Check if the current user is linked to the client
-  IF client_user_id = auth.uid() THEN
-    -- Update the quote status
+  -- Logging
+  RAISE LOG 'validate_quote: Client user_id=%, current_user=%', client_user_id, current_user_id;
+  
+  -- Check if client user exists
+  IF client_user_id IS NULL THEN
+    RAISE LOG 'validate_quote: Client has no user_id';
+    RETURN FALSE;
+  END IF;
+  
+  -- Allow validation if user is client owner OR has admin role
+  IF client_user_id = current_user_id OR user_role = 'admin' THEN
+    -- Update quote status
     UPDATE quotes
     SET status = 'Validé',
         updated_at = NOW()
     WHERE id = quote_id;
     
+    RAISE LOG 'validate_quote: Success - validated quote %', quote_id;
     RETURN TRUE;
   ELSE
+    RAISE LOG 'validate_quote: Permission denied - user % (role %) not owner or admin', 
+      current_user_id, user_role;
+    RETURN FALSE;
+  END IF;
+EXCEPTION WHEN OTHERS THEN
+  GET STACKED DIAGNOSTICS log_message = MESSAGE_TEXT;
+  RAISE LOG 'validate_quote: Exception - %', log_message;
+  RETURN FALSE;
+END;
+$$ LANGUAGE plpgsql SECURITY DEFINER;
+
+-- Grant execute permission on validate_quote
+GRANT EXECUTE ON FUNCTION public.validate_quote(UUID) TO authenticated;
+
+-- Function to check authentication status
+CREATE OR REPLACE FUNCTION check_auth() 
+RETURNS JSONB AS $$
+BEGIN
+  RETURN jsonb_build_object(
+    'user_id', auth.uid(),
+    'role', (SELECT role FROM users WHERE id = auth.uid()),
+    'email', (SELECT email FROM users WHERE id = auth.uid()),
+    'client_id', (SELECT id FROM clients WHERE user_id = auth.uid())
+  );
+END;
+$$ LANGUAGE plpgsql SECURITY DEFINER;
+
+-- Grant execute permission on check_auth
+GRANT EXECUTE ON FUNCTION public.check_auth() TO authenticated;
+
+-- Function to manually validate quotes without needing RLS
+CREATE OR REPLACE FUNCTION manual_validate_quote(
+  quote_id UUID,
+  user_email TEXT
+) RETURNS BOOLEAN AS $$
+DECLARE
+  user_id UUID;
+  user_role TEXT;
+  quote_client_id UUID;
+  client_user_id UUID;
+  quote_status quote_status;
+BEGIN
+  -- Find the user by email
+  SELECT id, role::TEXT INTO user_id, user_role
+  FROM users
+  WHERE email = user_email;
+  
+  -- Log for debugging
+  RAISE LOG 'manual_validate: User % has role %', user_email, user_role;
+  
+  -- Check if user exists
+  IF user_id IS NULL THEN
+    RAISE LOG 'manual_validate: No user found with email %', user_email;
+    RETURN FALSE;
+  END IF;
+  
+  -- Get quote info
+  SELECT client_id, status INTO quote_client_id, quote_status
+  FROM quotes
+  WHERE id = quote_id;
+  
+  -- Check if quote is valid
+  IF quote_client_id IS NULL THEN
+    RAISE LOG 'manual_validate: Quote % not found', quote_id;
+    RETURN FALSE;
+  END IF;
+  
+  IF quote_status != 'En attente de validation' THEN
+    RAISE LOG 'manual_validate: Quote status is %', quote_status;
+    RETURN FALSE;
+  END IF;
+  
+  -- Get client user ID
+  SELECT c.user_id INTO client_user_id
+  FROM clients c
+  WHERE c.id = quote_client_id;
+  
+  -- Allow validation if user is the client owner OR is an admin
+  IF user_id = client_user_id OR user_role = 'admin' THEN
+    -- Update quote status
+    UPDATE quotes
+    SET status = 'Validé',
+        updated_at = NOW()
+    WHERE id = quote_id;
+    
+    RAISE LOG 'manual_validate: Successfully validated quote % by %', quote_id, user_email;
+    RETURN TRUE;
+  ELSE
+    RAISE LOG 'manual_validate: Permission denied for % (not owner or admin)', user_email;
     RETURN FALSE;
   END IF;
 END;
 $$ LANGUAGE plpgsql SECURITY DEFINER;
+
+-- Grant execute permission on manual_validate_quote
+GRANT EXECUTE ON FUNCTION public.manual_validate_quote(UUID, TEXT) TO authenticated;
 
 -- Function to sign a PV (for client usage)
 CREATE OR REPLACE FUNCTION sign_pv(pv_id UUID) 
@@ -960,3 +1203,65 @@ HOW TO USE THIS DATABASE SCHEMA:
    - The UI
    - By calling: SELECT sign_pv('pv_id_here');
 */
+
+-- Debugging function to check quote validation permission
+CREATE OR REPLACE FUNCTION debug_quote_validation_permission(quote_id UUID)
+RETURNS jsonb AS $$
+DECLARE
+  quote_record RECORD;
+  client_record RECORD;
+  user_role TEXT;
+  result jsonb;
+BEGIN
+  -- Get the quote details
+  SELECT * INTO quote_record
+  FROM quotes
+  WHERE id = quote_id;
+  
+  -- If quote not found
+  IF quote_record IS NULL THEN
+    RETURN jsonb_build_object(
+      'has_permission', false,
+      'reason', 'Quote not found'
+    );
+  END IF;
+  
+  -- Get the client linked to this quote
+  SELECT * INTO client_record
+  FROM clients
+  WHERE id = quote_record.client_id;
+  
+  -- Get user's role
+  SELECT role::TEXT INTO user_role
+  FROM users
+  WHERE id = auth.uid();
+  
+  -- Create the result object
+  result := jsonb_build_object(
+    'quote_id', quote_id,
+    'client_id', quote_record.client_id,
+    'quote_status', quote_record.status,
+    'client_user_id', client_record.user_id,
+    'current_user_id', auth.uid(),
+    'user_role', user_role,
+    'is_client_owner', client_record.user_id = auth.uid(),
+    'is_admin', user_role = 'admin',
+    'status_pending', quote_record.status = 'En attente de validation',
+    'has_permission', (
+      (client_record.user_id = auth.uid() OR user_role = 'admin') AND 
+      quote_record.status = 'En attente de validation'
+    )
+  );
+  
+  IF NOT (client_record.user_id = auth.uid() OR user_role = 'admin') THEN
+    result := result || jsonb_build_object('reason', 'User is neither the client owner nor an admin');
+  ELSIF NOT (quote_record.status = 'En attente de validation') THEN
+    result := result || jsonb_build_object('reason', 'Quote status is not "En attente de validation"');
+  END IF;
+  
+  RETURN result;
+END;
+$$ LANGUAGE plpgsql SECURITY DEFINER;
+
+-- Grant execute permission to authenticated users
+GRANT EXECUTE ON FUNCTION public.debug_quote_validation_permission(UUID) TO authenticated;

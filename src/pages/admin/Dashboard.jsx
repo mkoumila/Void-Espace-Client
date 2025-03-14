@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import { Link } from 'react-router-dom'
 import { 
   UserPlusIcon, 
@@ -12,46 +12,14 @@ import {
   BuildingOfficeIcon,
   EyeIcon
 } from '@heroicons/react/24/outline'
+import { useAuth } from '../../api/AuthContext'
+import * as userService from '../../api/userService'
 
 function Admin() {
-  const [users, setUsers] = useState([
-    {
-      id: 1,
-      name: 'Marie Dupont',
-      email: 'marie.dupont@client.fr',
-      role: 'Administrateur',
-      company: 'Attijari CIB',
-      lastLogin: '2024-03-20T14:30:00',
-      status: 'active'
-    },
-    {
-      id: 2,
-      name: 'Jean Martin',
-      email: 'jean.martin@client.fr',
-      role: 'Client',
-      company: 'Attijari CIB',
-      lastLogin: '2024-03-18T09:15:00',
-      status: 'active'
-    },
-    {
-      id: 3,
-      name: 'Sophie Bernard',
-      email: 'sophie.bernard@client.fr',
-      role: 'Client',
-      company: 'Attijari MDM',
-      lastLogin: '2024-03-15T11:45:00',
-      status: 'inactive'
-    },
-    {
-      id: 4,
-      name: 'Thomas Dubois',
-      email: 'thomas.dubois@void.fr',
-      role: 'Gestionnaire',
-      company: 'VOID',
-      lastLogin: '2024-03-21T08:30:00',
-      status: 'active'
-    }
-  ])
+  const [users, setUsers] = useState([])
+  const [loading, setLoading] = useState(true)
+  const [error, setError] = useState(null)
+  const { hasPermission } = useAuth()
 
   const [searchQuery, setSearchQuery] = useState('')
   const [roleFilter, setRoleFilter] = useState('Tous les rôles')
@@ -64,6 +32,48 @@ function Admin() {
     company: '',
     status: 'active'
   })
+
+  // Format date with time
+  const formatDateTime = (dateString) => {
+    if (!dateString) return 'Jamais connecté';
+    
+    try {
+      const date = new Date(dateString);
+      
+      // Check if date is valid
+      if (isNaN(date.getTime())) return 'Date invalide';
+      
+      // Format date: DD/MM/YYYY à HH:MM
+      return date.toLocaleDateString('fr-FR', {
+        day: '2-digit',
+        month: '2-digit',
+        year: 'numeric',
+        hour: '2-digit',
+        minute: '2-digit'
+      });
+    } catch (error) {
+      console.error('Error formatting date:', error);
+      return 'Format de date invalide';
+    }
+  };
+
+  // Fetch users from Supabase
+  useEffect(() => {
+    const fetchUsers = async () => {
+      try {
+        setLoading(true)
+        const formattedUsers = await userService.fetchUsers()
+        setUsers(formattedUsers)
+      } catch (error) {
+        console.error('Error fetching users:', error)
+        setError('Failed to load users. Please try again later.')
+      } finally {
+        setLoading(false)
+      }
+    }
+
+    fetchUsers()
+  }, [])
 
   const filteredUsers = users.filter(user => {
     const matchesSearch = 
@@ -79,30 +89,86 @@ function Admin() {
     return matchesSearch && matchesRole && matchesStatus;
   });
 
-  const handleAddUser = (e) => {
+  const handleAddUser = async (e) => {
     e.preventDefault()
-    setUsers([...users, { ...newUser, id: users.length + 1, lastLogin: null }])
-    setNewUser({
-      name: '',
-      email: '',
-      role: 'Client',
-      company: '',
-      status: 'active'
-    })
-    setShowAddUserModal(false)
+    
+    try {
+      setLoading(true)
+      
+      const newUserData = await userService.createUser({
+        name: newUser.name,
+        email: newUser.email,
+        role: newUser.role,
+        company: newUser.company
+      })
+      
+      // Add the new user to the list
+      setUsers([...users, newUserData])
+      
+      // Reset the form
+      setNewUser({
+        name: '',
+        email: '',
+        role: 'Client',
+        company: '',
+        status: 'active'
+      })
+      
+      setShowAddUserModal(false)
+    } catch (error) {
+      console.error('Error creating user:', error)
+      alert(`Failed to create user: ${error.message}`)
+    } finally {
+      setLoading(false)
+    }
   }
 
-  const handleResendInvitation = (userId) => {
-    // TODO: Implémenter l'envoi d'invitation
-    console.log('Invitation envoyée à l\'utilisateur', userId)
+  const handleResendInvitation = async (userId) => {
+    try {
+      setLoading(true)
+      
+      // Get the user's email
+      const user = users.find(u => u.id === userId)
+      if (!user) throw new Error('User not found')
+      
+      // Resend invitation
+      await userService.resendInvitation(user.email)
+      
+      alert(`Invitation sent to ${user.email}`)
+    } catch (error) {
+      console.error('Error sending invitation:', error)
+      alert(`Failed to send invitation: ${error.message}`)
+    } finally {
+      setLoading(false)
+    }
   }
 
-  const handleToggleStatus = (userId) => {
-    setUsers(users.map(user => 
-      user.id === userId 
-        ? { ...user, status: user.status === 'active' ? 'inactive' : 'active' }
-        : user
-    ))
+  const handleToggleStatus = async (userId) => {
+    try {
+      setLoading(true)
+      
+      // Find the user
+      const user = users.find(u => u.id === userId)
+      if (!user) throw new Error('User not found')
+      
+      // Toggle status
+      const newStatus = user.status === 'active' ? 'inactive' : 'active'
+      
+      // Update status in backend
+      await userService.updateUserStatus(userId, newStatus)
+      
+      // Update local state
+      setUsers(users.map(u => 
+        u.id === userId 
+          ? { ...u, status: newStatus }
+          : u
+      ))
+    } catch (error) {
+      console.error('Error toggling user status:', error)
+      alert(`Failed to update user status: ${error.message}`)
+    } finally {
+      setLoading(false)
+    }
   }
 
   const getRoleIcon = (role) => {
@@ -183,105 +249,127 @@ function Admin() {
 
       {/* Liste des utilisateurs */}
       <div className="bg-white rounded-lg shadow-sm border border-gray-200 overflow-hidden">
-        <table className="min-w-full divide-y divide-gray-200">
-          <thead className="bg-gray-50">
-            <tr>
-              <th scope="col" className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                Utilisateur
-              </th>
-              <th scope="col" className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                Rôle
-              </th>
-              <th scope="col" className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                Entreprise
-              </th>
-              <th scope="col" className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                Dernière connexion
-              </th>
-              <th scope="col" className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                Statut
-              </th>
-              <th scope="col" className="px-6 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider">
-                Actions
-              </th>
-            </tr>
-          </thead>
-          <tbody className="bg-white divide-y divide-gray-200">
-            {filteredUsers.map((user) => (
-              <tr key={user.id} className="hover:bg-gray-50">
-                <td className="px-6 py-4 whitespace-nowrap">
-                  <div className="flex items-center">
-                    <div className="flex-shrink-0 h-10 w-10 rounded-full bg-void text-white flex items-center justify-center">
-                      {user.name.charAt(0)}
-                    </div>
-                    <div className="ml-4">
-                      <div className="text-sm font-medium text-gray-900">{user.name}</div>
-                      <div className="text-sm text-gray-500">{user.email}</div>
-                    </div>
-                  </div>
-                </td>
-                <td className="px-6 py-4 whitespace-nowrap">
-                  <span className={`px-2 py-1 inline-flex items-center text-xs leading-5 font-semibold rounded-full ${getRoleBadgeColor(user.role)}`}>
-                    {getRoleIcon(user.role)}
-                    <span className="ml-1">{user.role}</span>
-                  </span>
-                </td>
-                <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
-                  {user.company}
-                </td>
-                <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
-                  {user.lastLogin ? new Date(user.lastLogin).toLocaleString() : 'Jamais connecté'}
-                </td>
-                <td className="px-6 py-4 whitespace-nowrap">
-                  <span className={`px-2 py-1 inline-flex text-xs leading-5 font-semibold rounded-full ${
-                    user.status === 'active' ? 'bg-green-100 text-green-800' : 'bg-gray-100 text-gray-800'
-                  }`}>
-                    {user.status === 'active' ? 'Actif' : 'Inactif'}
-                  </span>
-                </td>
-                <td className="px-6 py-4 whitespace-nowrap text-right text-sm font-medium">
-                  <div className="flex items-center justify-end space-x-2">
-                    {user.status !== 'active' && (
-                      <button
-                        onClick={() => handleResendInvitation(user.id)}
-                        className="text-gray-400 hover:text-void"
-                        title="Renvoyer l'invitation"
-                      >
-                        <EnvelopeIcon className="h-5 w-5" />
-                      </button>
-                    )}
-                    <button
-                      onClick={() => handleToggleStatus(user.id)}
-                      className="text-gray-400 hover:text-void"
-                      title={user.status === 'active' ? 'Désactiver' : 'Activer'}
-                    >
-                      <ArrowPathIcon className="h-5 w-5" />
-                    </button>
-                    <Link
-                      to={`/admin/users/${user.id}`}
-                      className="text-gray-400 hover:text-void"
-                      title="Voir détails"
-                    >
-                      <EyeIcon className="h-5 w-5" />
-                    </Link>
-                    <button
-                      className="text-gray-400 hover:text-void"
-                      title="Modifier"
-                    >
-                      <PencilSquareIcon className="h-5 w-5" />
-                    </button>
-                    <button
-                      className="text-gray-400 hover:text-red-500"
-                      title="Supprimer"
-                    >
-                      <TrashIcon className="h-5 w-5" />
-                    </button>
-                  </div>
-                </td>
+        {loading && users.length === 0 ? (
+          <div className="p-6 text-center">
+            <p className="text-gray-500">Chargement des utilisateurs...</p>
+          </div>
+        ) : error ? (
+          <div className="p-6 text-center">
+            <p className="text-red-500">{error}</p>
+            <button 
+              onClick={() => window.location.reload()}
+              className="mt-2 text-void hover:underline"
+            >
+              Réessayer
+            </button>
+          </div>
+        ) : filteredUsers.length === 0 ? (
+          <div className="p-6 text-center">
+            <p className="text-gray-500">Aucun utilisateur trouvé</p>
+          </div>
+        ) : (
+          <table className="min-w-full divide-y divide-gray-200">
+            <thead className="bg-gray-50">
+              <tr>
+                <th scope="col" className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                  Utilisateur
+                </th>
+                <th scope="col" className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                  Rôle
+                </th>
+                <th scope="col" className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                  Entreprise
+                </th>
+                <th scope="col" className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                  Dernière connexion
+                </th>
+                <th scope="col" className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                  Statut
+                </th>
+                <th scope="col" className="px-6 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider">
+                  Actions
+                </th>
               </tr>
-            ))}
-          </tbody>
-        </table>
+            </thead>
+            <tbody className="bg-white divide-y divide-gray-200">
+              {filteredUsers.map((user) => (
+                <tr key={user.id} className="hover:bg-gray-50">
+                  <td className="px-6 py-4 whitespace-nowrap">
+                    <div className="flex items-center">
+                      <div className="flex-shrink-0 h-10 w-10 rounded-full bg-void text-white flex items-center justify-center">
+                        {user.name.charAt(0)}
+                      </div>
+                      <div className="ml-4">
+                        <div className="text-sm font-medium text-gray-900">{user.name}</div>
+                        <div className="text-sm text-gray-500">{user.email}</div>
+                      </div>
+                    </div>
+                  </td>
+                  <td className="px-6 py-4 whitespace-nowrap">
+                    <span className={`px-2 py-1 inline-flex items-center text-xs leading-5 font-semibold rounded-full ${getRoleBadgeColor(user.role)}`}>
+                      {getRoleIcon(user.role)}
+                      <span className="ml-1">{user.role}</span>
+                    </span>
+                  </td>
+                  <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
+                    {user.company}
+                  </td>
+                  <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
+                    {formatDateTime(user.lastLogin)}
+                  </td>
+                  <td className="px-6 py-4 whitespace-nowrap">
+                    <span className={`px-2 py-1 inline-flex text-xs leading-5 font-semibold rounded-full ${
+                      user.status === 'active' ? 'bg-green-100 text-green-800' : 'bg-gray-100 text-gray-800'
+                    }`}>
+                      {user.status === 'active' ? 'Actif' : 'Inactif'}
+                    </span>
+                  </td>
+                  <td className="px-6 py-4 whitespace-nowrap text-right text-sm font-medium">
+                    <div className="flex items-center justify-end space-x-2">
+                      {user.status !== 'active' && (
+                        <button
+                          onClick={() => handleResendInvitation(user.id)}
+                          className="text-gray-400 hover:text-void"
+                          title="Renvoyer l'invitation"
+                          disabled={loading}
+                        >
+                          <EnvelopeIcon className="h-5 w-5" />
+                        </button>
+                      )}
+                      <button
+                        onClick={() => handleToggleStatus(user.id)}
+                        className="text-gray-400 hover:text-void"
+                        title={user.status === 'active' ? 'Désactiver' : 'Activer'}
+                        disabled={loading}
+                      >
+                        <ArrowPathIcon className="h-5 w-5" />
+                      </button>
+                      <Link
+                        to={`/admin/users/${user.id}`}
+                        className="text-gray-400 hover:text-void"
+                        title="Voir détails"
+                      >
+                        <EyeIcon className="h-5 w-5" />
+                      </Link>
+                      <button
+                        className="text-gray-400 hover:text-void"
+                        title="Modifier"
+                      >
+                        <PencilSquareIcon className="h-5 w-5" />
+                      </button>
+                      <button
+                        className="text-gray-400 hover:text-red-500"
+                        title="Supprimer"
+                      >
+                        <TrashIcon className="h-5 w-5" />
+                      </button>
+                    </div>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        )}
       </div>
 
       {/* Modal d'ajout d'utilisateur */}
@@ -369,14 +457,16 @@ function Admin() {
                   type="button"
                   onClick={() => setShowAddUserModal(false)}
                   className="px-4 py-2 border border-gray-300 rounded-md shadow-sm text-sm font-medium text-gray-700 bg-white hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-void"
+                  disabled={loading}
                 >
                   Annuler
                 </button>
                 <button
                   type="submit"
                   className="px-4 py-2 border border-transparent rounded-md shadow-sm text-sm font-medium text-white bg-void hover:bg-void-light focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-void"
+                  disabled={loading}
                 >
-                  Ajouter
+                  {loading ? 'Ajout en cours...' : 'Ajouter'}
                 </button>
               </div>
             </form>

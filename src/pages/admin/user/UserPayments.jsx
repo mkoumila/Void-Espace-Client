@@ -1,5 +1,6 @@
 import { useState, useEffect, useRef } from 'react'
 import { useParams, useLocation } from 'react-router-dom'
+import supabaseClient from '../../../api/supabaseClient'
 
 import UserHeader from '../../../components/admin/user/UserHeader'
 import UserTabs from '../../../components/admin/user/UserTabs'
@@ -44,26 +45,78 @@ function UserPayments() {
     const fetchData = async () => {
       setLoading(true)
       try {
-        // Utiliser Promise.all pour exécuter les deux requêtes en parallèle
-        const [userResponse, paymentsResponse] = await Promise.all([
-          fetch(`/api/users/${userId}`),
-          fetch(`/api/users/${userId}/payments`)
-        ])
+        // Récupérer les données utilisateur depuis Supabase
+        const { data: userData, error: userError } = await supabaseClient
+          .from('users')
+          .select('*')
+          .eq('id', userId)
+          .single();
         
-        const userData = await userResponse.json()
-        const paymentsData = await paymentsResponse.json()
-        
-        if (userData.error) {
-          throw new Error(userData.error.message || 'Erreur lors du chargement des données utilisateur')
+        if (userError) {
+          throw new Error(userError.message || 'Erreur lors du chargement des données utilisateur');
         }
         
-        if (paymentsData.error) {
-          throw new Error(paymentsData.error.message || 'Erreur lors du chargement des paiements')
+        // Récupérer les informations client
+        const { data: clientData, error: clientError } = await supabaseClient
+          .from('clients')
+          .select('id')
+          .eq('user_id', userId)
+          .single();
+          
+        if (clientError && clientError.code !== 'PGRST116') { // Ignore "no rows returned" error
+          throw new Error(clientError.message || 'Erreur lors du chargement des données client');
         }
         
-        setUser(userData.data)
-        setPayments(paymentsData.data)
-        setLoading(false)
+        const clientId = clientData?.id;
+        
+        // Récupérer les paiements depuis Supabase
+        const { data: paymentsData, error: paymentsError } = await supabaseClient
+          .from('payments')
+          .select(`
+            id,
+            amount,
+            payment_date,
+            status,
+            payment_method,
+            reference,
+            description,
+            project_id,
+            quote_id,
+            created_at,
+            projects(name)
+          `)
+          .eq('client_id', clientId)
+          .order('payment_date', { ascending: false });
+        
+        if (paymentsError) {
+          throw new Error(paymentsError.message || 'Erreur lors du chargement des paiements');
+        }
+        
+        // Formater les paiements pour l'affichage
+        const formattedPayments = paymentsData.map(payment => ({
+          id: payment.id,
+          amount: payment.amount,
+          date: payment.payment_date,
+          status: payment.status,
+          method: payment.payment_method || 'N/A',
+          reference: payment.reference || 'N/A',
+          description: payment.description || '',
+          project: payment.projects?.name || 'N/A',
+          project_id: payment.project_id
+        }));
+        
+        setUser({
+          id: userData.id,
+          name: `${userData.first_name || ''} ${userData.last_name || ''}`.trim() || userData.email,
+          email: userData.email,
+          phone: userData.phone || '',
+          company: userData.company || '',
+          status: userData.status || 'active',
+          role: userData.role
+        });
+        
+        setPayments(formattedPayments);
+        setLoading(false);
       } catch (err) {
         console.error('Erreur lors du chargement des données:', err)
         setError(`Erreur: ${err.message}`)
@@ -87,61 +140,91 @@ function UserPayments() {
   // Fonction pour mettre à jour un paiement
   const handleUpdatePayment = async (updatedPayment) => {
     try {
-      const response = await fetch(`/api/payments/${updatedPayment.id}`, {
-        method: 'PATCH',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify(updatedPayment),
-      });
-      
-      const result = await response.json();
-      
-      if (result.error) {
-        throw new Error(result.error.message || 'Erreur lors de la mise à jour du paiement');
+      const { error } = await supabaseClient
+        .from('payments')
+        .update({
+          amount: updatedPayment.amount,
+          status: updatedPayment.status,
+          payment_method: updatedPayment.method,
+          reference: updatedPayment.reference,
+          description: updatedPayment.description,
+          // Autres champs à mettre à jour si nécessaire
+        })
+        .eq('id', updatedPayment.id);
+        
+      if (error) {
+        throw new Error(`Erreur lors de la mise à jour du paiement: ${error.message}`);
       }
       
       // Mettre à jour la liste des paiements
       const updatedPayments = payments.map(payment => 
-        payment.id === updatedPayment.id ? result.data : payment
+        payment.id === updatedPayment.id ? updatedPayment : payment
       );
       
       setPayments(updatedPayments);
       
     } catch (err) {
       console.error('Erreur lors de la mise à jour du paiement:', err);
-      alert('Une erreur est survenue lors de la mise à jour du paiement');
+      alert(`Une erreur est survenue: ${err.message}`);
     }
   };
 
   // Fonction pour créer un nouveau paiement
   const handleCreatePayment = async (newPayment) => {
     try {
-      const response = await fetch('/api/payments', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({
-          ...newPayment,
-          assigned_user: parseInt(userId),
-          date: new Date().toISOString().split('T')[0],
-          status: 'pending'
-        }),
-      });
-      
-      const result = await response.json();
-      
-      if (result.error) {
-        throw new Error(result.error.message || 'Erreur lors de la création du paiement');
+      // Récupérer d'abord l'ID client associé à cet utilisateur
+      const { data: clientData, error: clientError } = await supabaseClient
+        .from('clients')
+        .select('id')
+        .eq('user_id', userId)
+        .single();
+        
+      if (clientError) {
+        throw new Error('Impossible de trouver le client associé à cet utilisateur');
       }
       
+      // Créer le paiement dans la base de données
+      const { data: paymentData, error: paymentError } = await supabaseClient
+        .from('payments')
+        .insert([
+          {
+            amount: newPayment.amount,
+            payment_date: new Date().toISOString().split('T')[0],
+            status: newPayment.status || 'En attente',
+            payment_method: newPayment.method,
+            reference: newPayment.reference,
+            description: newPayment.description,
+            client_id: clientData.id,
+            project_id: newPayment.project_id || null,
+            quote_id: newPayment.quote_id || null
+          }
+        ])
+        .select()
+        .single();
+        
+      if (paymentError) {
+        throw new Error(`Erreur lors de la création du paiement: ${paymentError.message}`);
+      }
+      
+      // Formater le paiement pour l'ajouter à la liste
+      const formattedPayment = {
+        id: paymentData.id,
+        amount: paymentData.amount,
+        date: paymentData.payment_date,
+        status: paymentData.status,
+        method: paymentData.payment_method || 'N/A',
+        reference: paymentData.reference || 'N/A',
+        description: paymentData.description || '',
+        project: newPayment.project || 'N/A',
+        project_id: paymentData.project_id
+      };
+      
       // Ajouter le nouveau paiement à la liste
-      setPayments([...payments, result.data]);
+      setPayments([formattedPayment, ...payments]);
       
     } catch (err) {
       console.error('Erreur lors de la création du paiement:', err);
-      alert('Une erreur est survenue lors de la création du paiement');
+      alert(`Une erreur est survenue: ${err.message}`);
     }
   };
 

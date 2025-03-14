@@ -1,5 +1,6 @@
 import { useState, useEffect, useRef } from 'react'
 import { useParams, useLocation } from 'react-router-dom'
+import supabaseClient from '../../../api/supabaseClient'
 
 import DocumentsTab from '../../../components/admin/user/DocumentsTab'
 import CreatePVModal from '../../../components/admin/user/CreatePVModal'
@@ -45,26 +46,63 @@ function UserDocuments() {
     const fetchData = async () => {
       setLoading(true)
       try {
-        // Utiliser Promise.all pour exécuter les deux requêtes en parallèle
-        const [userResponse, documentsResponse] = await Promise.all([
-          fetch(`/api/users/${userId}`),
-          fetch(`/api/users/${userId}/documents`)
-        ])
+        // Récupérer les données utilisateur depuis Supabase
+        const { data: userData, error: userError } = await supabaseClient
+          .from('users')
+          .select('*')
+          .eq('id', userId)
+          .single();
         
-        const userData = await userResponse.json()
-        const documentsData = await documentsResponse.json()
-        
-        if (userData.error) {
-          throw new Error(userData.error.message || 'Erreur lors du chargement des données utilisateur')
+        if (userError) {
+          throw new Error(userError.message || 'Erreur lors du chargement des données utilisateur');
         }
         
-        if (documentsData.error) {
-          throw new Error(documentsData.error.message || 'Erreur lors du chargement des documents')
+        // Récupérer les documents depuis Supabase (PV pour l'instant)
+        const { data: documentsData, error: documentsError } = await supabaseClient
+          .from('pv')
+          .select(`
+            id,
+            title,
+            description,
+            status,
+            signature_date,
+            file_path,
+            client_id,
+            project_id,
+            created_at,
+            projects (name)
+          `)
+          .or(`client_id.eq.${userData.id}`)
+          .order('created_at', { ascending: false });
+        
+        if (documentsError) {
+          throw new Error(documentsError.message || 'Erreur lors du chargement des documents');
         }
         
-        setUser(userData.data)
-        setDocuments(documentsData.data)
-        setLoading(false)
+        // Formater les documents pour l'affichage
+        const formattedDocuments = documentsData.map(doc => ({
+          id: doc.id,
+          title: doc.title,
+          type: 'pv',
+          status: doc.status,
+          date: doc.created_at,
+          project: doc.projects?.name || 'N/A',
+          project_id: doc.project_id,
+          file_path: doc.file_path
+        }));
+        
+        setUser({
+          id: userData.id,
+          name: `${userData.first_name || ''} ${userData.last_name || ''}`.trim() || userData.email,
+          email: userData.email,
+          phone: userData.phone || '',
+          company: userData.company || '',
+          status: userData.status || 'active',
+          role: userData.role
+        });
+        
+        setDocuments(formattedDocuments);
+        setLoading(false);
       } catch (err) {
         console.error('Erreur lors du chargement des données:', err)
         setError(`Erreur: ${err.message}`)
@@ -110,33 +148,66 @@ function UserDocuments() {
     }
     
     try {
-      // Créer le nouveau document via l'API
-      const response = await fetch('/api/documents', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({
-          title: newPV.title,
-          project: newPV.project,
-          project_id: 1, // Idéalement, cela serait dynamique
-          date: new Date().toISOString().split('T')[0],
-          status: 'pending',
-          assigned_user: parseInt(userId),
-          type: 'pv',
-          fileUrl: URL.createObjectURL(newPV.file), // Simuler une URL de fichier
-          reminders: []
-        }),
-      });
-      
-      const result = await response.json();
-      
-      if (result.error) {
-        throw new Error(result.error.message || 'Erreur lors de la création du PV');
+      // Récupérer d'abord l'ID client associé à cet utilisateur
+      const { data: clientData, error: clientError } = await supabaseClient
+        .from('clients')
+        .select('id')
+        .eq('user_id', userId)
+        .single();
+        
+      if (clientError) {
+        throw new Error('Impossible de trouver le client associé à cet utilisateur');
       }
       
-      // Ajouter le nouveau document à la liste
-      setDocuments([...documents, result.data]);
+      // Générer un nom de fichier unique
+      const fileExt = newPV.file.name.split('.').pop();
+      const fileName = `${Date.now()}_${Math.random().toString(36).substr(2, 9)}.${fileExt}`;
+      const filePath = `${fileName}`;
+      
+      // Uploader le fichier dans le bucket de stockage
+      const { error: uploadError } = await supabaseClient
+        .storage
+        .from('pv_files')
+        .upload(filePath, newPV.file);
+        
+      if (uploadError) {
+        throw new Error(`Erreur lors de l'upload du fichier: ${uploadError.message}`);
+      }
+      
+      // Créer l'entrée PV dans la base de données
+      const { data: pvData, error: pvError } = await supabaseClient
+        .from('pv')
+        .insert([
+          {
+            title: newPV.title,
+            description: newPV.description,
+            status: 'En attente de signature',
+            file_path: filePath,
+            client_id: clientData.id,
+            project_id: newPV.project_id || null // Si un projet est sélectionné
+          }
+        ])
+        .select()
+        .single();
+        
+      if (pvError) {
+        throw new Error(`Erreur lors de la création du PV: ${pvError.message}`);
+      }
+      
+      // Formater le PV pour l'ajouter à la liste
+      const formattedPV = {
+        id: pvData.id,
+        title: pvData.title,
+        type: 'pv',
+        status: pvData.status,
+        date: pvData.created_at,
+        project: newPV.project || 'N/A',
+        project_id: pvData.project_id,
+        file_path: pvData.file_path
+      };
+      
+      // Ajouter le nouveau PV à la liste
+      setDocuments([formattedPV, ...documents]);
       
       // Réinitialiser le formulaire
       setNewPV({
@@ -150,37 +221,41 @@ function UserDocuments() {
       
     } catch (err) {
       console.error('Erreur lors de la création du PV:', err);
-      alert('Une erreur est survenue lors de la création du PV');
+      alert(`Une erreur est survenue: ${err.message}`);
     }
   }
 
   // Fonction pour mettre à jour un document
   const handleUpdateDocument = async (updatedDocument) => {
     try {
-      const response = await fetch(`/api/documents/${updatedDocument.id}`, {
-        method: 'PATCH',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify(updatedDocument),
-      });
-      
-      const result = await response.json();
-      
-      if (result.error) {
-        throw new Error(result.error.message || 'Erreur lors de la mise à jour du document');
+      // Pour l'instant, seuls les PV sont gérés
+      if (updatedDocument.type === 'pv') {
+        const { error } = await supabaseClient
+          .from('pv')
+          .update({
+            title: updatedDocument.title,
+            description: updatedDocument.description,
+            status: updatedDocument.status,
+            // Autres champs à mettre à jour si nécessaire
+          })
+          .eq('id', updatedDocument.id);
+          
+        if (error) {
+          throw new Error(`Erreur lors de la mise à jour du PV: ${error.message}`);
+        }
+        
+        // Mettre à jour la liste des documents
+        const updatedDocuments = documents.map(doc => 
+          doc.id === updatedDocument.id ? updatedDocument : doc
+        );
+        
+        setDocuments(updatedDocuments);
+      } else {
+        throw new Error('Type de document non pris en charge pour la mise à jour');
       }
-      
-      // Mettre à jour la liste des documents
-      const updatedDocuments = documents.map(doc => 
-        doc.id === updatedDocument.id ? result.data : doc
-      );
-      
-      setDocuments(updatedDocuments);
-      
     } catch (err) {
       console.error('Erreur lors de la mise à jour du document:', err);
-      alert('Une erreur est survenue lors de la mise à jour du document');
+      alert(`Une erreur est survenue: ${err.message}`);
     }
   };
 

@@ -6,8 +6,8 @@ import {
   ClockIcon,
   PlusIcon,
 } from '@heroicons/react/24/outline'
-import supabaseClient from '../api/supabaseClient'
 import { useAuth } from '../api/AuthContext'
+import * as quoteService from '../api/quoteService'
 
 function Quotes() {
   const [quotes, setQuotes] = useState([])
@@ -35,40 +35,9 @@ function Quotes() {
       setError(null)
       
       try {
-        let query = supabaseClient
-          .from('quotes')
-          .select(`
-            id,
-            reference,
-            title,
-            description,
-            amount,
-            issue_date,
-            valid_until,
-            status,
-            file_path,
-            client_id,
-            clients (name)
-          `)
-          .order('issue_date', { ascending: false })
-        
-        // Apply filter if needed
-        if (filter === 'pending') {
-          query = query.eq('status', 'En attente de validation')
-        } else if (filter === 'validated') {
-          query = query.eq('status', 'Validé')
-        } else if (filter === 'expired') {
-          query = query.eq('status', 'Expiré')
-        }
-        
-        const { data, error } = await query
-        
-        if (error) {
-          console.error('Error fetching quotes:', error)
-          setError(`Erreur lors de la récupération des devis: ${error.message}`)
-        } else {
-          setQuotes(data || [])
-        }
+        // Use the new quote service which includes expired quote checks
+        const data = await quoteService.fetchQuotes(filter);
+        setQuotes(data || []);
       } catch (err) {
         console.error('Exception when fetching quotes:', err)
         setError(`Une erreur est survenue: ${err.message}`)
@@ -78,7 +47,7 @@ function Quotes() {
     }
     
     fetchQuotes()
-  }, [filter, authLoading, sessionChecked, user, navigate])
+  }, [user, authLoading, sessionChecked, navigate, filter])
 
   const getStatusColor = (status) => {
     switch (status) {
@@ -95,18 +64,19 @@ function Quotes() {
 
   const handleValidateQuote = async (quoteId) => {
     try {
-      // Update quote status in Supabase
-      const { error } = await supabaseClient
-        .from('quotes')
-        .update({ 
-          status: 'Validé',
-          updated_at: new Date().toISOString()
-        })
-        .eq('id', quoteId)
+      setLoading(true);
+      setError(null);
       
-      if (error) {
-        console.error('Error validating quote:', error)
-        return
+      // Skip debug permission check and go straight to validation
+      // This ensures we don't rely on functions that might not be in the database
+      
+      // Use the quote service's validateQuote method
+      const { success } = await quoteService.validateQuote(quoteId);
+      
+      if (!success) {
+        console.error('Error validating quote: server returned false');
+        setError('Impossible de valider ce devis. Vous n\'avez pas les permissions nécessaires ou le devis n\'est plus en attente de validation.');
+        return;
       }
       
       // Update local state
@@ -114,60 +84,19 @@ function Quotes() {
         quote.id === quoteId 
           ? { ...quote, status: 'Validé' }
           : quote
-      ))
+      ));
     } catch (err) {
-      console.error('Exception when validating quote:', err)
+      console.error('Exception when validating quote:', err);
+      setError(`Erreur lors de la validation: ${err.message}`);
+    } finally {
+      setLoading(false);
     }
   }
 
   const handleDownloadFile = async (filePath, quoteReference) => {
     try {
-      // If no file path, show error
-      if (!filePath) {
-        setError('Aucun fichier associé à ce devis');
-        return;
-      }
-      
-      // Get the bucket and filename from the path
-      let bucket = 'quote_files';
-      let fileName = filePath;
-      
-      // If the path includes the bucket name, extract it
-      if (filePath.includes('/')) {
-        const parts = filePath.split('/');
-        if (parts.length > 1) {
-          // The path might be like "quote_files/filename.pdf" or just "filename.pdf"
-          fileName = parts[parts.length - 1];
-          if (parts.length > 2) {
-            bucket = parts[parts.length - 2];
-          }
-        }
-      }
-      
-      // Get the file from Supabase Storage
-      const { data, error } = await supabaseClient
-        .storage
-        .from(bucket)
-        .download(fileName);
-        
-      if (error) {
-        setError(`Erreur lors du téléchargement: ${error.message}`);
-        return;
-      }
-      
-      // Create a URL for the blob
-      const url = URL.createObjectURL(data);
-      
-      // Create an anchor element and trigger download
-      const link = document.createElement('a');
-      link.href = url;
-      link.download = `devis-${quoteReference || fileName}`;
-      document.body.appendChild(link);
-      link.click();
-      document.body.removeChild(link);
-      
-      // Clean up the URL
-      URL.revokeObjectURL(url);
+      // Use the quote service to handle file download
+      await quoteService.downloadQuoteFile(filePath, quoteReference);
     } catch (err) {
       setError(`Une erreur est survenue lors du téléchargement: ${err.message}`);
     }
@@ -228,7 +157,7 @@ function Quotes() {
           {hasPermission('admin') && (
             <button
               onClick={() => navigate('/quotes/add')}
-              className="inline-flex items-center px-4 py-2 border border-transparent rounded-md shadow-sm text-sm font-medium text-white bg-blue-600 hover:bg-blue-700"
+              className="inline-flex items-center px-4 py-2 border border-transparent rounded-md shadow-sm text-sm font-medium text-white bg-void hover:bg-void-light"
             >
               <PlusIcon className="h-5 w-5 mr-2" />
               Nouveau devis

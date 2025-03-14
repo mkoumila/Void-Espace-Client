@@ -4,6 +4,8 @@ import { useParams, useLocation } from 'react-router-dom'
 import UserHeader from '../../../components/admin/user/UserHeader'
 import UserTabs from '../../../components/admin/user/UserTabs'
 import QuotesTab from '../../../components/admin/user/QuotesTab'
+import supabaseClient from '../../../api/supabaseClient'
+import * as quoteService from '../../../api/quoteService'
 
 function UserQuotes() {
   const { userId } = useParams()
@@ -23,7 +25,7 @@ function UserQuotes() {
   const activeTab = getActiveTab()
   
   const [user, setUser] = useState({
-    id: 1,
+    id: userId,
     name: '',
     email: '',
     phone: '',
@@ -44,140 +46,159 @@ function UserQuotes() {
     const fetchData = async () => {
       setLoading(true)
       try {
-        // Utiliser Promise.all pour exécuter les deux requêtes en parallèle
-        const [userResponse, quotesResponse] = await Promise.all([
-          fetch(`/api/users/${userId}`),
-          fetch(`/api/users/${userId}/quotes`)
-        ])
+        // 1. Fetch complete user data from the users table
+        const { data: userData, error: userError } = await supabaseClient
+          .from('users')
+          .select('*')
+          .eq('id', userId)
+          .single();
         
-        const userData = await userResponse.json()
-        const quotesData = await quotesResponse.json()
-        
-        if (userData.error) {
-          throw new Error(userData.error.message || 'Erreur lors du chargement des données utilisateur')
+        if (userError) {
+          throw new Error(userError.message || 'Erreur lors du chargement des données utilisateur');
         }
         
-        if (quotesData.error) {
-          throw new Error(quotesData.error.message || 'Erreur lors du chargement des devis')
+        // 2. Fetch client data for this user
+        const { data: clientData, error: clientError } = await supabaseClient
+          .from('clients')
+          .select('*')
+          .eq('user_id', userId);
+        
+        if (clientError) {
+          throw new Error(clientError.message || 'Erreur lors du chargement des données client');
         }
         
-        setUser(userData.data)
-        setQuotes(quotesData.data)
-        setLoading(false)
+        let quotesData = [];
+        // 3. If we have a client record, fetch quotes for this client
+        if (clientData && clientData.length > 0) {
+          // Update any expired quotes first
+          await quoteService.updateExpiredQuotes();
+          
+          const clientId = clientData[0].id;
+          const { data: clientQuotes, error: quotesError } = await supabaseClient
+            .from('quotes')
+            .select('*, clients(name)')
+            .eq('client_id', clientId)
+            .order('issue_date', { ascending: false });
+          
+          if (quotesError) {
+            throw new Error(quotesError.message || 'Erreur lors du chargement des devis');
+          }
+          
+          quotesData = clientQuotes || [];
+        }
+        
+        // 4. Format the user data combining both user and client information
+        const formattedUser = {
+          id: userData.id,
+          name: [userData.first_name, userData.last_name].filter(Boolean).join(' ') || userData.email,
+          email: userData.email,
+          phone: userData.phone || (clientData && clientData[0]?.phone) || '',
+          company: userData.company || (clientData && clientData[0]?.name) || '',
+          address: clientData && clientData[0]?.address || '',
+          city: clientData && clientData[0]?.city || '',
+          postal_code: clientData && clientData[0]?.postal_code || '',
+          country: clientData && clientData[0]?.country || '',
+          status: clientData && clientData.length > 0 ? 'active' : 'inactive',
+          role: userData.role,
+          avatar_url: userData.avatar_url
+        };
+        
+        setUser(formattedUser);
+        setQuotes(quotesData);
+        setLoading(false);
       } catch (err) {
-        console.error('Erreur lors du chargement des données:', err)
-        setError(`Erreur: ${err.message}`)
-        setLoading(false)
+        console.error('Erreur lors du chargement des données:', err);
+        setError(`Erreur: ${err.message}`);
+        setLoading(false);
       }
       
       // Marquer les données comme chargées
-      dataFetchedRef.current = true
+      dataFetchedRef.current = true;
     }
     
     if (userId) {
-      fetchData()
+      fetchData();
     }
     
     // Nettoyage lors du démontage du composant
     return () => {
-      dataFetchedRef.current = false
+      dataFetchedRef.current = false;
     }
   }, [userId])
 
   // Fonction pour mettre à jour un devis
   const handleUpdateQuote = async (updatedQuote) => {
     try {
-      const response = await fetch(`/api/quotes/${updatedQuote.id}`, {
-        method: 'PATCH',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify(updatedQuote),
-      });
+      // Extract id and prepare the quote data object without the id
+      const { id, ...quoteData } = updatedQuote;
       
-      const result = await response.json();
+      const result = await quoteService.updateQuote(id, quoteData);
       
-      if (result.error) {
-        throw new Error(result.error.message || 'Erreur lors de la mise à jour du devis');
+      if (result) {
+        // Mettre à jour l'état local des devis
+        setQuotes(quotes.map(quote => 
+          quote.id === id ? { ...quote, ...result } : quote
+        ));
+        return { success: true };
       }
-      
-      // Mettre à jour la liste des devis
-      const updatedQuotes = quotes.map(quote => 
-        quote.id === updatedQuote.id ? result.data : quote
-      );
-      
-      setQuotes(updatedQuotes);
-      
+      return { success: false, error: 'Échec de la mise à jour du devis' };
     } catch (err) {
       console.error('Erreur lors de la mise à jour du devis:', err);
-      alert('Une erreur est survenue lors de la mise à jour du devis');
+      return { success: false, error: err.message };
     }
-  };
+  }
 
   // Fonction pour créer un nouveau devis
   const handleCreateQuote = async (newQuote) => {
     try {
-      const response = await fetch('/api/quotes', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({
-          ...newQuote,
-          assigned_user: parseInt(userId),
-          date: new Date().toISOString().split('T')[0],
-          status: 'pending'
-        }),
-      });
+      const result = await quoteService.createQuote(newQuote);
       
-      const result = await response.json();
-      
-      if (result.error) {
-        throw new Error(result.error.message || 'Erreur lors de la création du devis');
+      if (result) {
+        // Ajouter le nouveau devis à l'état local
+        setQuotes([result, ...quotes]);
+        return { success: true, data: result };
       }
-      
-      // Ajouter le nouveau devis à la liste
-      setQuotes([...quotes, result.data]);
-      
+      return { success: false, error: 'Échec de la création du devis' };
     } catch (err) {
       console.error('Erreur lors de la création du devis:', err);
-      alert('Une erreur est survenue lors de la création du devis');
+      return { success: false, error: err.message };
     }
-  };
+  }
 
-  if (error) {
-    return (
-      <div className="p-6 bg-red-50 rounded-lg">
-        <h2 className="text-xl font-semibold text-red-700">Erreur</h2>
-        <p className="text-red-600">{error}</p>
-      </div>
-    );
+  // Fonction pour supprimer un devis
+  const handleDeleteQuote = async (quoteId) => {
+    try {
+      const { success } = await quoteService.deleteQuote(quoteId);
+      
+      if (success) {
+        // Mettre à jour l'état local en supprimant le devis
+        setQuotes(quotes.filter(quote => quote.id !== quoteId));
+        return { success: true };
+      }
+      return { success: false, error: 'Échec de la suppression du devis' };
+    } catch (err) {
+      console.error('Erreur lors de la suppression du devis:', err);
+      return { success: false, error: err.message };
+    }
   }
 
   return (
-    <div className="space-y-6">
-      {/* Header avec navigation */}
-      <UserHeader user={user} />
-
-      {/* Onglets de navigation */}
+    <>
+      <UserHeader user={user} loading={loading} />
       <UserTabs userId={userId} activeTab={activeTab} />
-
-      {/* Contenu des devis */}
+      
       <div className="mt-6">
-        {loading ? (
-          <div className="flex justify-center items-center h-64">
-            <div className="animate-spin rounded-full h-12 w-12 border-t-2 border-b-2 border-void"></div>
-          </div>
-        ) : (
-          <QuotesTab 
-            user={user} 
-            quotes={quotes} 
-            onUpdateQuote={handleUpdateQuote}
-            onCreateQuote={handleCreateQuote}
-          />
-        )}
+        <QuotesTab 
+          quotes={quotes} 
+          loading={loading} 
+          error={error} 
+          onUpdateQuote={handleUpdateQuote}
+          onCreateQuote={handleCreateQuote}
+          onDeleteQuote={handleDeleteQuote}
+          userId={userId}
+        />
       </div>
-    </div>
+    </>
   )
 }
 

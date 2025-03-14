@@ -198,7 +198,7 @@ function AddQuote() {
                   accept=".pdf,.docx,.png,.jpg,.jpeg,.gif"
                   onChange={handleChange}
                   required
-                  className="block w-full text-sm text-gray-500 file:mr-4 file:rounded-md file:border-0 file:bg-blue-50 file:px-4 file:py-2 file:text-sm file:font-semibold file:text-blue-700 hover:file:bg-blue-100"
+                  className="block w-full text-sm text-gray-500 file:mr-4 file:rounded-md file:border-0 file:bg-gray-50 file:px-4 file:py-2 file:text-sm file:font-semibold file:text-void hover:file:bg-gray-100 cursor-pointer"
                 />
               </div>
               <p className="mt-1 text-sm text-gray-500">Formats acceptés: PDF, DOCX, ou images. Maximum 10MB.</p>
@@ -216,7 +216,7 @@ function AddQuote() {
             <button
               type="submit"
               disabled={loading}
-              className="inline-flex justify-center rounded-md border border-transparent bg-blue-600 px-4 py-2 text-sm font-medium text-white shadow-sm hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2"
+              className="inline-flex justify-center rounded-md border border-transparent bg-void px-4 py-2 text-sm font-medium text-white shadow-sm hover:bg-void-light focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2"
             >
               {loading ? (
                 <>
