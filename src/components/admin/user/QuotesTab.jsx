@@ -20,7 +20,7 @@ import {
   PaperAirplaneIcon,
 } from "@heroicons/react/24/outline";
 import supabaseClient from "../../../api/supabaseClient";
-import { downloadQuoteFile } from "../../../api/quoteService";
+import { downloadQuoteFile, fetchQuoteFollowups, createQuoteFollowup } from "../../../api/quoteService";
 
 function QuotesTab({
   quotes: allQuotes,
@@ -30,6 +30,7 @@ function QuotesTab({
   onCreateQuote,
   onDeleteQuote,
   userId,
+  user,
 }) {
   const [showAddQuoteModal, setShowAddQuoteModal] = useState(false);
   const [showEditQuoteModal, setShowEditQuoteModal] = useState(false);
@@ -74,7 +75,8 @@ function QuotesTab({
   const [showEmailForm, setShowEmailForm] = useState(false);
   const [showPhoneForm, setShowPhoneForm] = useState(false);
   const [emailContent, setEmailContent] = useState("");
-  const [phoneNote, setPhoneNote] = useState("");
+  const [phoneContent, setPhoneContent] = useState("");
+  const [followups, setFollowups] = useState({});
 
   // Filter quotes based on search query and status filter
   const filteredQuotes = allQuotes.filter((quote) => {
@@ -557,69 +559,84 @@ function QuotesTab({
     }
   };
 
-  // Update the handleEmailRelance function
-  const handleEmailRelance = (quoteId) => {
-    // Set the default email template when the button is clicked
-    const quoteToRelance = allQuotes.find((q) => q.id === quoteId);
-    if (quoteToRelance) {
-      setEmailContent(`Bonjour,
+  // Fetch followups when a quote is selected
+  useEffect(() => {
+    const fetchFollowups = async () => {
+      if (quoteDetail) {
+        try {
+          const data = await fetchQuoteFollowups(quoteDetail.id);
+          setFollowups(prev => ({ ...prev, [quoteDetail.id]: data }));
+        } catch (err) {
+          console.error('Error fetching followups:', err);
+        }
+      }
+    };
 
-Nous vous rappelons que le devis "${quoteToRelance.reference}" d'un montant de ${formatAmount(quoteToRelance.amount)} est en attente de validation.
-Date d'expiration : ${formatDate(quoteToRelance.valid_until)}
+    fetchFollowups();
+  }, [quoteDetail]);
 
-Cordialement,
-L'équipe VOID`);
+  // Handle email relance
+  const handleEmailRelance = async () => {
+    try {
+      const followupData = {
+        email: true, // This will set type to 'email'
+        comment: emailContent,
+        created_by: userId
+      };
+
+      await createQuoteFollowup(quoteDetail.id, followupData);
+      
+      // Update followups state
+      const newFollowup = {
+        id: Date.now(),
+        type: 'email',
+        comment: emailContent,
+        created_at: new Date().toISOString(),
+        created_by: userId
+      };
+      
+      setFollowups(prev => ({
+        ...prev,
+        [quoteDetail.id]: [newFollowup, ...(prev[quoteDetail.id] || [])]
+      }));
+
+      setShowEmailForm(false);
+      setEmailContent("");
+    } catch (err) {
+      console.error('Error creating email followup:', err);
     }
-    
-    // Show the email form and hide the phone form
-    setShowEmailForm(true);
-    setShowPhoneForm(false);
   };
-  
-  // Update the handlePhoneRelance function
-  const handlePhoneRelance = (quoteId) => {
-    // Reset phone note when the button is clicked
-    setPhoneNote("");
-    
-    // Show the phone form and hide the email form
-    setShowPhoneForm(true);
-    setShowEmailForm(false);
-  };
-  
-  // Add new handlers for form submission
-  const handleSendEmailReminder = () => {
-    // Implement sending the email - for now, just show a confirmation
-    alert(`Email de relance envoyé: ${emailContent}`);
-    
-    // TODO: Actually send the email and store the reminder
-    
-    // Close the form
-    setShowEmailForm(false);
-  };
-  
-  const handleSavePhoneReminder = () => {
-    // Check if the note is not empty
-    if (!phoneNote.trim()) {
-      alert("Veuillez saisir les détails de l'appel.");
-      return;
+
+  // Handle phone relance
+  const handlePhoneRelance = async () => {
+    try {
+      const followupData = {
+        email: false, // This will set type to 'phone'
+        comment: phoneContent,
+        created_by: userId
+      };
+
+      await createQuoteFollowup(quoteDetail.id, followupData);
+      
+      // Update followups state
+      const newFollowup = {
+        id: Date.now(),
+        type: 'phone',
+        comment: phoneContent,
+        created_at: new Date().toISOString(),
+        created_by: userId
+      };
+      
+      setFollowups(prev => ({
+        ...prev,
+        [quoteDetail.id]: [newFollowup, ...(prev[quoteDetail.id] || [])]
+      }));
+
+      setShowPhoneForm(false);
+      setPhoneContent("");
+    } catch (err) {
+      console.error('Error creating phone followup:', err);
     }
-    
-    // Implement saving the phone call note - for now, just show a confirmation
-    alert(`Note d'appel enregistrée: ${phoneNote}`);
-    
-    // TODO: Store the phone reminder
-    
-    // Close the form
-    setShowPhoneForm(false);
-  };
-  
-  // Add handlers for canceling forms
-  const handleCancelEmailForm = () => {
-    setShowEmailForm(false);
-  };
-  
-  const handleCancelPhoneForm = () => {
-    setShowPhoneForm(false);
   };
 
   // If there's an error, display it
@@ -1308,7 +1325,7 @@ L'équipe VOID`);
 
       {/* Modal de détails du devis */}
       {showDetailModal && quoteDetail && (
-        <div className="fixed inset-0 bg-gray-500 bg-opacity-75 flex items-center justify-center z-50">
+        <div className="fixed inset-0 bg-gray-500 bg-opacity-75 flex items-center justify-center z-50 !mt-0">
           <div className="bg-white rounded-lg shadow-xl max-w-4xl w-full p-6 max-h-[90vh] overflow-y-auto">
             <div className="flex justify-between items-start mb-6">
               <h2 className="text-xl font-bold text-gray-900">
@@ -1453,14 +1470,14 @@ L'équipe VOID`);
                   {quoteDetail.status === "En attente de validation" && (
                     <div className="flex space-x-2 mb-4">
                       <button
-                        onClick={() => handleEmailRelance(quoteDetail.id)}
+                        onClick={() => setShowEmailForm(true)}
                         className="inline-flex items-center px-3 py-1.5 border border-transparent rounded-md shadow-sm text-sm font-medium text-white bg-void hover:bg-void-light"
                       >
                         <EnvelopeIcon className="h-4 w-4 mr-1" />
                         Relance par email
                       </button>
                       <button
-                        onClick={() => handlePhoneRelance(quoteDetail.id)}
+                        onClick={() => setShowPhoneForm(true)}
                         className="inline-flex items-center px-3 py-1.5 border border-gray-300 rounded-md text-sm font-medium text-gray-700 bg-white hover:bg-gray-50"
                       >
                         <PhoneIcon className="h-4 w-4 mr-1" />
@@ -1481,16 +1498,18 @@ L'équipe VOID`);
                       />
                       <div className="flex justify-end space-x-2 mt-2">
                         <button
-                          onClick={handleCancelEmailForm}
+                          onClick={() => setShowEmailForm(false)}
                           className="inline-flex items-center px-3 py-1.5 border border-gray-300 rounded-md text-sm font-medium text-gray-700 bg-white hover:bg-gray-50"
                         >
                           Annuler
                         </button>
                         <button
-                          onClick={handleSendEmailReminder}
+                          onClick={handleEmailRelance}
                           className="inline-flex items-center px-3 py-1.5 border border-transparent rounded-md shadow-sm text-sm font-medium text-white bg-void hover:bg-void-light"
                         >
-                          <PaperAirplaneIcon className="h-4 w-4 mr-1" />
+                          <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth="1.5" stroke="currentColor" className="h-4 w-4 mr-1">
+                            <path strokeLinecap="round" strokeLinejoin="round" d="M6 12 3.269 3.125A59.769 59.769 0 0 1 21.485 12 59.768 59.768 0 0 1 3.27 20.875L5.999 12Zm0 0h7.5" />
+                          </svg>
                           Envoyer
                         </button>
                       </div>
@@ -1505,18 +1524,18 @@ L'équipe VOID`);
                         placeholder="Saisissez les détails de votre appel..."
                         rows="3"
                         className="block w-full rounded-md border-gray-300 shadow-sm focus:ring-void focus:border-void sm:text-sm"
-                        value={phoneNote}
-                        onChange={(e) => setPhoneNote(e.target.value)}
+                        value={phoneContent}
+                        onChange={(e) => setPhoneContent(e.target.value)}
                       />
                       <div className="flex justify-end space-x-2 mt-2">
                         <button
-                          onClick={handleCancelPhoneForm}
+                          onClick={() => setShowPhoneForm(false)}
                           className="inline-flex items-center px-3 py-1.5 border border-gray-300 rounded-md text-sm font-medium text-gray-700 bg-white hover:bg-gray-50"
                         >
                           Annuler
                         </button>
                         <button
-                          onClick={handleSavePhoneReminder}
+                          onClick={handlePhoneRelance}
                           className="inline-flex items-center px-3 py-1.5 border border-transparent rounded-md shadow-sm text-sm font-medium text-white bg-void hover:bg-void-light"
                         >
                           Enregistrer
@@ -1526,14 +1545,48 @@ L'équipe VOID`);
                   )}
                   
                   <div className="space-y-3 max-h-60 overflow-y-auto">
-                    {/* Example reminder */}
-                    {quoteDetail.status === "En attente de validation" ? (
+                    {followups[quoteDetail.id]?.length > 0 ? (
+                      followups[quoteDetail.id].map((followup) => (
+                        <div key={followup.id} className="flex items-start space-x-3 p-2 border-l-2 border-void">
+                          <div className="flex-shrink-0 h-8 w-8 rounded-full bg-void-light flex items-center justify-center">
+                            {followup.type === 'email' ? (
+                              <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth="1.5" stroke="currentColor" className="h-4 w-4 text-void">
+                                <path strokeLinecap="round" strokeLinejoin="round" d="M21.75 6.75v10.5a2.25 2.25 0 0 1-2.25 2.25h-15a2.25 2.25 0 0 1-2.25-2.25V6.75m19.5 0A2.25 2.25 0 0 0 19.5 4.5h-15a2.25 2.25 0 0 0-2.25 2.25m19.5 0v.243a2.25 2.25 0 0 1-1.07 1.916l-7.5 4.615a2.25 2.25 0 0 1-2.36 0L3.32 8.91a2.25 2.25 0 0 1-1.07-1.916V6.75" />
+                              </svg>
+                            ) : (
+                              <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth="1.5" stroke="currentColor" className="h-4 w-4 text-void">
+                                <path strokeLinecap="round" strokeLinejoin="round" d="M2.25 6.75c0 8.284 6.716 15 15 15h2.25a2.25 2.25 0 0 0 2.25-2.25v-1.372c0-.516-.351-.966-.852-1.091l-4.423-1.106c-.44-.11-.902.055-1.173.417l-.97 1.293c-.282.376-.769.542-1.21.38a12.035 12.035 0 0 1-7.143-7.143c-.162-.441.004-.928.38-1.21l1.293-.97c.363-.271.527-.734.417-1.173L6.963 3.102a1.125 1.125 0 0 0-1.091-.852H4.5A2.25 2.25 0 0 0 2.25 4.5v2.25Z" />
+                              </svg>
+                            )}
+                          </div>
+                          <div className="flex-1">
+                            <div className="flex items-center justify-between">
+                              <p className="text-sm font-medium">
+                                {followup.type === 'email' ? 'Relance par email' : 'Relance téléphonique'}
+                              </p>
+                              <p className="text-xs text-gray-500">
+                                {new Date(followup.created_at).toLocaleDateString('fr-FR', {
+                                  day: '2-digit',
+                                  month: 'numeric',
+                                  year: 'numeric',
+                                  hour: '2-digit',
+                                  minute: '2-digit',
+                                  second: '2-digit',
+                                  hour12: true
+                                })}
+                              </p>
+                            </div>
+                            <div className="mt-1">
+                              {followup.comment && (
+                                <p className="text-sm text-gray-600 mt-1 whitespace-pre-line">{followup.comment}</p>
+                              )}
+                            </div>
+                          </div>
+                        </div>
+                      ))
+                    ) : (
                       <p className="text-sm text-gray-500 italic">
                         Aucune relance effectuée pour le moment.
-                      </p>
-                    ) : (
-                      <p className="text-sm text-gray-600">
-                        Aucune relance effectuée pour ce devis.
                       </p>
                     )}
                   </div>

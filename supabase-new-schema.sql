@@ -177,6 +177,42 @@ CREATE POLICY "Users can create payment followups"
     )
   );
 
+-- Quote Followups Table
+CREATE TABLE IF NOT EXISTS quote_followups (
+  id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+  quote_id UUID NOT NULL REFERENCES quotes(id) ON DELETE CASCADE,
+  type TEXT NOT NULL CHECK (type IN ('email', 'phone')),
+  comment TEXT,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  created_by UUID NOT NULL REFERENCES auth.users(id) ON DELETE CASCADE
+);
+
+-- Enable RLS on quote_followups table
+ALTER TABLE quote_followups ENABLE ROW LEVEL SECURITY;
+
+-- Create policies for quote_followups
+CREATE POLICY "Users can view their own quote followups"
+  ON quote_followups FOR SELECT
+  USING (
+    EXISTS (
+      SELECT 1 FROM quotes q
+      JOIN clients c ON q.client_id = c.id
+      WHERE q.id = quote_followups.quote_id
+      AND c.user_id = auth.uid()
+    )
+  );
+
+CREATE POLICY "Users can create quote followups"
+  ON quote_followups FOR INSERT
+  WITH CHECK (
+    EXISTS (
+      SELECT 1 FROM quotes q
+      JOIN clients c ON q.client_id = c.id
+      WHERE q.id = quote_followups.quote_id
+      AND c.user_id = auth.uid()
+    )
+  );
+
 -- ==========================================
 -- AUTO-ADD USERS FROM AUTH SIGNUP
 -- ==========================================
@@ -309,6 +345,7 @@ ALTER TABLE pv ENABLE ROW LEVEL SECURITY;
 ALTER TABLE tma ENABLE ROW LEVEL SECURITY;
 ALTER TABLE tma_activities ENABLE ROW LEVEL SECURITY;
 ALTER TABLE payment_followups ENABLE ROW LEVEL SECURITY;
+ALTER TABLE quote_followups ENABLE ROW LEVEL SECURITY;
 
 -- ==========================================
 -- HELPER FUNCTIONS FOR RLS
@@ -831,6 +868,11 @@ EXECUTE PROCEDURE trigger_set_timestamp();
 
 CREATE TRIGGER set_timestamp_payment_followups
 BEFORE UPDATE ON payment_followups
+FOR EACH ROW
+EXECUTE PROCEDURE trigger_set_timestamp();
+
+CREATE TRIGGER set_timestamp_quote_followups
+BEFORE UPDATE ON quote_followups
 FOR EACH ROW
 EXECUTE PROCEDURE trigger_set_timestamp();
 

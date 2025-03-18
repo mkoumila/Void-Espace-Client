@@ -355,4 +355,104 @@ export const debugQuoteValidationPermission = async (quoteId) => {
     console.error(`Error checking quote validation permission:`, error);
     throw error;
   }
-}; 
+};
+
+// Fetch followups for a quote
+export const fetchQuoteFollowups = async (quoteId) => {
+  try {
+    const { data, error } = await supabaseClient
+      .from('quote_followups')
+      .select(`
+        id,
+        type,
+        comment,
+        created_at,
+        created_by
+      `)
+      .eq('quote_id', quoteId)
+      .order('created_at', { ascending: false });
+
+    if (error) throw error;
+    return data;
+  } catch (error) {
+    console.error('Error fetching quote followups:', error);
+    throw error;
+  }
+};
+
+// Create a new followup for a quote
+export const createQuoteFollowup = async (quoteId, followupData) => {
+  try {
+    const { data, error } = await supabaseClient
+      .from('quote_followups')
+      .insert([
+        {
+          quote_id: quoteId,
+          type: followupData.email ? 'email' : 'phone',
+          comment: followupData.comment,
+          created_by: followupData.created_by
+        }
+      ])
+      .select()
+      .single();
+
+    if (error) throw error;
+    return data;
+  } catch (error) {
+    console.error('Error creating quote followup:', error);
+    throw error;
+  }
+};
+
+const quoteService = {
+  // ... existing methods ...
+
+  // Fetch followups for a quote
+  async fetchQuoteFollowups(quoteId) {
+    try {
+      const { data, error } = await supabaseClient
+        .from('quote_followups')
+        .select(`
+          id,
+          type,
+          comment,
+          created_at,
+          created_by
+        `)
+        .eq('quote_id', quoteId)
+        .order('created_at', { ascending: false });
+
+      if (error) throw error;
+      return data;
+    } catch (error) {
+      console.error('Error fetching quote followups:', error);
+      throw error;
+    }
+  },
+
+  // Create a new followup for a quote
+  async createQuoteFollowup(quoteId, followupData) {
+    try {
+      const { data, error } = await supabaseClient
+        .from('quote_followups')
+        .insert([
+          {
+            quote_id: quoteId,
+            type: followupData.email ? 'email' : 'phone',
+            comment: followupData.comment,
+            created_by: followupData.created_by
+          }
+        ])
+        .select()
+        .single();
+
+      if (error) throw error;
+      return data;
+    } catch (error) {
+      console.error('Error creating quote followup:', error);
+      throw error;
+    }
+  }
+};
+
+export { quoteService }; 
