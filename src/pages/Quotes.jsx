@@ -152,17 +152,6 @@ function Quotes() {
             <option value="validated">Validés</option>
             <option value="expired">Expirés</option>
           </select>
-          
-          {/* Only admins can add new quotes */}
-          {hasPermission('admin') && (
-            <button
-              onClick={() => navigate('/quotes/add')}
-              className="inline-flex items-center px-4 py-2 border border-transparent rounded-md shadow-sm text-sm font-medium text-white bg-void hover:bg-void-light"
-            >
-              <PlusIcon className="h-5 w-5 mr-2" />
-              Nouveau devis
-            </button>
-          )}
         </div>
       </div>
 

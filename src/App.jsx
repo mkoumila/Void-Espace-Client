@@ -20,7 +20,6 @@ import UserDocuments from './pages/admin/user/UserDocuments'
 import UserPayments from './pages/admin/user/UserPayments'
 import UserProjects from './pages/admin/user/UserProjects'
 import UserQuotes from './pages/admin/user/UserQuotes'
-import AddQuote from './pages/admin/AddQuote'
 import ProtectedRoute from './components/ProtectedRoute'
 import { AuthProvider } from './api/AuthContext'
 
@@ -63,11 +62,6 @@ function App() {
               <Route path="/signature-pv" element={<SignaturePV />} />
               <Route path="/payments" element={<Payments />} />
               <Route path="/quotes" element={<Quotes />} />
-              
-              {/* Gestionnaire routes - require gestionnaire role */}
-              <Route element={<ProtectedRoute requiredRole="gestionnaire" />}>
-                <Route path="/quotes/add" element={<AddQuote />} />
-              </Route>
               
               {/* Admin routes - require admin role */}
               <Route element={<ProtectedRoute requiredRole="admin" />}>

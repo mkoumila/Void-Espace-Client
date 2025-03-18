@@ -6,6 +6,19 @@ export const fetchQuotes = async (filter = 'all') => {
     // First, update any expired quotes in the database
     await updateExpiredQuotes();
     
+    // Get the current user's ID and role
+    const { data: { user } } = await supabaseClient.auth.getUser();
+    if (!user) throw new Error('No authenticated user');
+    
+    // Get the client ID for this user
+    const { data: clientData, error: clientError } = await supabaseClient
+      .from('clients')
+      .select('id')
+      .eq('user_id', user.id)
+      .single();
+      
+    if (clientError) throw clientError;
+    
     // Build the query
     let query = supabaseClient
       .from('quotes')
@@ -22,6 +35,7 @@ export const fetchQuotes = async (filter = 'all') => {
         client_id,
         clients (name)
       `)
+      .eq('client_id', clientData.id) // Only show quotes for the current user's client
       .order('issue_date', { ascending: false });
     
     // Apply filter if needed

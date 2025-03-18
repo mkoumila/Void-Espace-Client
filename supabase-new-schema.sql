@@ -87,10 +87,12 @@ CREATE TABLE IF NOT EXISTS payments (
   id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
   amount DECIMAL(12, 2) NOT NULL,
   payment_date DATE NOT NULL,
+  due_date DATE NOT NULL,
   status payment_status NOT NULL,
   payment_method TEXT,
   reference TEXT,
   description TEXT,
+  file_path TEXT,
   client_id UUID NOT NULL REFERENCES clients(id) ON DELETE CASCADE,
   project_id UUID REFERENCES projects(id) ON DELETE SET NULL,
   quote_id UUID REFERENCES quotes(id) ON DELETE SET NULL,
@@ -138,6 +140,42 @@ CREATE TABLE IF NOT EXISTS tma_activities (
   created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
   updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
+
+-- Payment Followups Table
+CREATE TABLE IF NOT EXISTS payment_followups (
+  id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+  payment_id UUID NOT NULL REFERENCES payments(id) ON DELETE CASCADE,
+  type TEXT NOT NULL CHECK (type IN ('email', 'phone')),
+  comment TEXT,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  created_by UUID NOT NULL REFERENCES auth.users(id) ON DELETE CASCADE
+);
+
+-- Enable RLS on payment_followups table
+ALTER TABLE payment_followups ENABLE ROW LEVEL SECURITY;
+
+-- Create policies for payment_followups
+CREATE POLICY "Users can view their own payment followups"
+  ON payment_followups FOR SELECT
+  USING (
+    EXISTS (
+      SELECT 1 FROM payments p
+      JOIN clients c ON p.client_id = c.id
+      WHERE p.id = payment_followups.payment_id
+      AND c.user_id = auth.uid()
+    )
+  );
+
+CREATE POLICY "Users can create payment followups"
+  ON payment_followups FOR INSERT
+  WITH CHECK (
+    EXISTS (
+      SELECT 1 FROM payments p
+      JOIN clients c ON p.client_id = c.id
+      WHERE p.id = payment_followups.payment_id
+      AND c.user_id = auth.uid()
+    )
+  );
 
 -- ==========================================
 -- AUTO-ADD USERS FROM AUTH SIGNUP
@@ -253,7 +291,8 @@ INSERT INTO storage.buckets (id, name, public) VALUES
   ('quote_files', 'quote_files', false),
   ('pv_files', 'pv_files', false),
   ('project_files', 'project_files', false),
-  ('avatars', 'avatars', true)
+  ('avatars', 'avatars', true),
+  ('payments', 'payments', false)
 ON CONFLICT (id) DO NOTHING;
 
 -- ==========================================
@@ -269,6 +308,7 @@ ALTER TABLE payments ENABLE ROW LEVEL SECURITY;
 ALTER TABLE pv ENABLE ROW LEVEL SECURITY;
 ALTER TABLE tma ENABLE ROW LEVEL SECURITY;
 ALTER TABLE tma_activities ENABLE ROW LEVEL SECURITY;
+ALTER TABLE payment_followups ENABLE ROW LEVEL SECURITY;
 
 -- ==========================================
 -- HELPER FUNCTIONS FOR RLS
@@ -445,15 +485,16 @@ CREATE POLICY "Clients can validate their own quotes"
   );
 
 -- PAYMENTS TABLE POLICIES
--- Clients can view their own payments
-CREATE POLICY "Clients can view their own payments"
+-- Users can view their own payments
+CREATE POLICY "Users can view their own payments"
   ON payments FOR SELECT
-  USING (EXISTS (
-    SELECT 1 FROM clients 
-    WHERE clients.id = payments.client_id AND clients.user_id = auth.uid()
-  ));
+  USING (
+    client_id IN (
+      SELECT id FROM clients WHERE user_id = auth.uid()
+    )
+  );
 
--- Admins can view, create, and edit all payments
+-- Admins can view all payments
 CREATE POLICY "Admins can view all payments"
   ON payments FOR SELECT
   USING (is_admin() = TRUE);
@@ -706,6 +747,34 @@ CREATE POLICY "Users can delete their own avatar"
     AND (storage.foldername(name))[1] = auth.uid()::text
   );
 
+-- PAYMENT FILES POLICIES
+CREATE POLICY "Anyone authenticated can view files from payments"
+  ON storage.objects FOR SELECT
+  USING (
+    bucket_id = 'payments' AND auth.role() = 'authenticated'
+  );
+
+CREATE POLICY "Admins can upload files to payments"
+  ON storage.objects FOR INSERT
+  WITH CHECK (
+    bucket_id = 'payments'
+    AND is_admin() = TRUE
+  );
+
+CREATE POLICY "Admins can update files in payments"
+  ON storage.objects FOR UPDATE
+  USING (
+    bucket_id = 'payments'
+    AND is_admin() = TRUE
+  );
+
+CREATE POLICY "Admins can delete files from payments"
+  ON storage.objects FOR DELETE
+  USING (
+    bucket_id = 'payments'
+    AND is_admin() = TRUE
+  );
+
 -- ==========================================
 -- TRIGGERS FOR UPDATED_AT
 -- ==========================================
@@ -757,6 +826,11 @@ EXECUTE PROCEDURE trigger_set_timestamp();
 
 CREATE TRIGGER set_timestamp_tma_activities
 BEFORE UPDATE ON tma_activities
+FOR EACH ROW
+EXECUTE PROCEDURE trigger_set_timestamp();
+
+CREATE TRIGGER set_timestamp_payment_followups
+BEFORE UPDATE ON payment_followups
 FOR EACH ROW
 EXECUTE PROCEDURE trigger_set_timestamp();
 

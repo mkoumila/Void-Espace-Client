@@ -83,7 +83,9 @@ function UserPayments() {
             project_id,
             quote_id,
             created_at,
-            projects(name)
+            projects(name),
+            due_date,
+            file_path
           `)
           .eq('client_id', clientId)
           .order('payment_date', { ascending: false });
@@ -97,12 +99,14 @@ function UserPayments() {
           id: payment.id,
           amount: payment.amount,
           date: payment.payment_date,
+          due_date: payment.due_date,
           status: payment.status,
           method: payment.payment_method || 'N/A',
           reference: payment.reference || 'N/A',
           description: payment.description || '',
           project: payment.projects?.name || 'N/A',
-          project_id: payment.project_id
+          project_id: payment.project_id,
+          file_path: payment.file_path
         }));
         
         setUser({
@@ -189,14 +193,16 @@ function UserPayments() {
         .insert([
           {
             amount: newPayment.amount,
-            payment_date: new Date().toISOString().split('T')[0],
+            payment_date: newPayment.payment_date,
+            due_date: newPayment.due_date,
             status: newPayment.status || 'En attente',
-            payment_method: newPayment.method,
+            payment_method: newPayment.payment_method,
             reference: newPayment.reference,
             description: newPayment.description,
             client_id: clientData.id,
             project_id: newPayment.project_id || null,
-            quote_id: newPayment.quote_id || null
+            quote_id: newPayment.quote_id || null,
+            file_path: newPayment.file_path
           }
         ])
         .select()
@@ -211,16 +217,18 @@ function UserPayments() {
         id: paymentData.id,
         amount: paymentData.amount,
         date: paymentData.payment_date,
+        due_date: paymentData.due_date,
         status: paymentData.status,
         method: paymentData.payment_method || 'N/A',
         reference: paymentData.reference || 'N/A',
         description: paymentData.description || '',
         project: newPayment.project || 'N/A',
-        project_id: paymentData.project_id
+        project_id: paymentData.project_id,
+        file_path: paymentData.file_path
       };
       
       // Ajouter le nouveau paiement à la liste
-      setPayments([formattedPayment, ...payments]);
+      setPayments(prevPayments => [formattedPayment, ...prevPayments]);
       
     } catch (err) {
       console.error('Erreur lors de la création du paiement:', err);

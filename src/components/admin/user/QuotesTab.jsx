@@ -1266,7 +1266,7 @@ L'équipe VOID`);
                   className="px-4 py-2 border border-transparent rounded-md shadow-sm text-sm font-medium text-white bg-void hover:bg-void-light"
                 >
                   Mettre à jour
-                </button>
+                          </button>
                         </div>
                       </form>
                     </div>

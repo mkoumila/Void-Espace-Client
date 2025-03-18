@@ -20,11 +20,7 @@ function ProfileTab({ user, onResetPassword, onToggleStatus, onUpdateUser }) {
   const [editedUser, setEditedUser] = useState(user)
   const [processedUser, setProcessedUser] = useState(null)
 
-  // Debug: Log the user object to inspect its structure
   useEffect(() => {
-    console.log('ProfileTab user object:', user);
-    console.log('User ID:', user.id);
-    
     // Try to get the fully processed user data from userService if we have an empty lastLogin
     const fetchProcessedUserData = async () => {
       if (!user.lastLogin || user.lastLogin.trim() === '') {
@@ -34,52 +30,41 @@ function ProfileTab({ user, onResetPassword, onToggleStatus, onUpdateUser }) {
           // Find the current user in the processed data
           const processed = allUsers.find(u => u.id === user.id);
           if (processed) {
-            console.log('Found processed user data:', processed);
             setProcessedUser(processed);
           }
         } catch (error) {
-          console.error('Error fetching processed user data:', error);
+          // Silent error handling
         }
       }
     };
     
     fetchProcessedUserData();
-    
-    const lastLoginValue = getLastLoginTime();
-    console.log('Found lastLogin value:', lastLoginValue);
-    console.log('Formatted lastLogin:', formatDate(lastLoginValue));
   }, [user]);
 
   // Get the last login time from various possible property names
   const getLastLoginTime = () => {
     // If we have processed user data from userService, use that first
     if (processedUser && processedUser.lastLogin) {
-      console.log('Using lastLogin from processed user data:', processedUser.lastLogin);
       return processedUser.lastLogin;
     }
     
-    console.log('Checking user.lastLogin:', user.lastLogin);
     // Check if lastLogin exists and is not an empty string
     if (user.lastLogin && user.lastLogin.trim() !== '') return user.lastLogin;
     
-    console.log('Checking user.last_login:', user.last_login);
     if (user.last_login) return user.last_login;
     
     // Check for auth.users format
     if (user.auth && user.auth.last_sign_in_at) {
-      console.log('Found in auth.last_sign_in_at:', user.auth.last_sign_in_at);
       return user.auth.last_sign_in_at;
     }
     
     // Check raw DB format from user_management view
     if (user.last_sign_in_at) {
-      console.log('Found in last_sign_in_at:', user.last_sign_in_at);
       return user.last_sign_in_at;
     }
     
     // Check Dashboard format which might be a string already
     if (typeof user.lastLogin === 'string' && user.lastLogin.includes('/')) {
-      console.log('Found formatted date string:', user.lastLogin);
       return user.lastLogin;
     }
     
@@ -91,13 +76,11 @@ function ProfileTab({ user, onResetPassword, onToggleStatus, onUpdateUser }) {
         const latestLogin = loginLogs.sort((a, b) => 
           new Date(b.timestamp) - new Date(a.timestamp)
         )[0].timestamp;
-        console.log('Found in audit logs:', latestLogin);
         return latestLogin;
       }
     }
     
     // Return null to match Dashboard behavior
-    console.log('No login data found, returning null');
     return null;
   };
 
@@ -107,7 +90,6 @@ function ProfileTab({ user, onResetPassword, onToggleStatus, onUpdateUser }) {
     
     // If it's already a formatted string like "14/03/2025 13:27", just return it
     if (typeof dateString === 'string' && dateString.match(/^\d{2}\/\d{2}\/\d{4}/)) {
-      console.log('Already formatted date string:', dateString);
       return dateString;
     }
     
@@ -116,7 +98,6 @@ function ProfileTab({ user, onResetPassword, onToggleStatus, onUpdateUser }) {
       
       // Check if date is valid
       if (isNaN(date.getTime())) {
-        console.warn('Invalid date:', dateString);
         return 'Jamais connecté';
       }
       
@@ -129,7 +110,6 @@ function ProfileTab({ user, onResetPassword, onToggleStatus, onUpdateUser }) {
         second: '2-digit'
       }).replace(/\//g, '/');
     } catch (error) {
-      console.error('Error formatting date:', error, dateString);
       return 'Jamais connecté';
     }
   };
