@@ -1,8 +1,8 @@
 import { ArrowUpTrayIcon } from '@heroicons/react/24/outline'
 
-function CreatePVModal({ newPV, onChangeNewPV, onFileChange, onSubmit, onCancel }) {
+export default function CreatePVModal({ newPV, onChangeNewPV, onFileChange, onSubmit, onCancel, projects }) {
   return (
-    <div className="fixed inset-0 bg-gray-500 bg-opacity-75 flex items-center justify-center z-50">
+    <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
       <div className="bg-white rounded-lg shadow-xl max-w-md w-full p-6">
         <h3 className="text-lg font-medium text-gray-900 mb-4">
           Créer un nouveau PV
@@ -26,14 +26,19 @@ function CreatePVModal({ newPV, onChangeNewPV, onFileChange, onSubmit, onCancel 
             <label className="block text-sm font-medium text-gray-700 mb-1">
               Projet associé
             </label>
-            <input
-              type="text"
-              value={newPV.project}
-              onChange={(e) => onChangeNewPV({...newPV, project: e.target.value})}
+            <select
               className="block w-full rounded-md border-gray-300 shadow-sm focus:ring-void focus:border-void sm:text-sm"
-              placeholder="Ex: Refonte E-commerce"
               required
-            />
+              value={newPV.project_id || ''}
+              onChange={(e) => onChangeNewPV({ ...newPV, project_id: e.target.value })}
+            >
+              <option value="">Sélectionner un projet</option>
+              {projects.map((project) => (
+                <option key={project.id} value={project.id}>
+                  {project.name}
+                </option>
+              ))}
+            </select>
           </div>
 
           <div>
@@ -68,13 +73,14 @@ function CreatePVModal({ newPV, onChangeNewPV, onFileChange, onSubmit, onCancel 
                       type="file" 
                       className="sr-only"
                       onChange={onFileChange}
+                      accept=".pdf,.doc,.docx,image/*"
                       required
                     />
                   </label>
                   <p className="pl-1">ou glisser-déposer</p>
                 </div>
                 <p className="text-xs text-gray-500">
-                  PDF, Word ou Image jusqu'à 10MB
+                  PDF, DOC, DOCX ou Image jusqu'à 10MB
                 </p>
                 {newPV.file && (
                   <p className="text-sm text-green-600">
@@ -104,6 +110,4 @@ function CreatePVModal({ newPV, onChangeNewPV, onFileChange, onSubmit, onCancel 
       </div>
     </div>
   )
-}
-
-export default CreatePVModal 
+} 

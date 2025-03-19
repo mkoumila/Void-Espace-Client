@@ -1,6 +1,7 @@
 import { useState, useEffect, useRef } from 'react'
 import { useParams, useLocation } from 'react-router-dom'
 import supabaseClient from '../../../api/supabaseClient'
+import * as pvService from '../../../api/pvService'
 
 import DocumentsTab from '../../../components/admin/user/DocumentsTab'
 import CreatePVModal from '../../../components/admin/user/CreatePVModal'
@@ -25,7 +26,7 @@ function UserDocuments() {
   const activeTab = getActiveTab()
   
   const [user, setUser] = useState({
-    id: 1,
+    id: userId,
     name: '',
     email: '',
     phone: '',
@@ -35,99 +36,95 @@ function UserDocuments() {
   })
   
   const [documents, setDocuments] = useState([])
+  const [projects, setProjects] = useState([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState(null)
 
-  // Charger les données de l'utilisateur et ses documents en un seul useEffect
+  // Charger les données de l'utilisateur et les PVs
   useEffect(() => {
-    // Éviter les doubles appels en mode strict
     if (dataFetchedRef.current) return;
-    
-    const fetchData = async () => {
-      setLoading(true)
+    dataFetchedRef.current = true;
+
+    async function loadData() {
       try {
-        // Récupérer les données utilisateur depuis Supabase
+        setLoading(true);
+        setError(null);
+
+        // Fetch user data from Supabase
         const { data: userData, error: userError } = await supabaseClient
           .from('users')
           .select('*')
           .eq('id', userId)
           .single();
-        
-        if (userError) {
-          throw new Error(userError.message || 'Erreur lors du chargement des données utilisateur');
-        }
-        
-        // Récupérer les documents depuis Supabase (PV pour l'instant)
-        const { data: documentsData, error: documentsError } = await supabaseClient
+
+        if (userError) throw userError;
+
+        setUser(userData);
+
+        // Fetch client data to get client_id
+        const { data: clientData, error: clientError } = await supabaseClient
+          .from('clients')
+          .select('id')
+          .eq('user_id', userId)
+          .single();
+
+        if (clientError) throw clientError;
+
+        // Fetch projects for this client
+        const { data: projectsData, error: projectsError } = await supabaseClient
+          .from('projects')
+          .select('id, name')
+          .eq('client_id', clientData.id)
+          .order('name');
+
+        if (projectsError) throw projectsError;
+        setProjects(projectsData);
+
+        // Fetch PVs for this client
+        const { data: pvData, error: pvError } = await supabaseClient
           .from('pv')
           .select(`
-            id,
-            title,
-            description,
-            status,
-            signature_date,
-            file_path,
-            client_id,
-            project_id,
-            created_at,
-            projects (name)
+            *,
+            projects:project_id (
+              id,
+              name
+            )
           `)
-          .or(`client_id.eq.${userData.id}`)
+          .eq('client_id', clientData.id)
           .order('created_at', { ascending: false });
-        
-        if (documentsError) {
-          throw new Error(documentsError.message || 'Erreur lors du chargement des documents');
-        }
-        
-        // Formater les documents pour l'affichage
-        const formattedDocuments = documentsData.map(doc => ({
-          id: doc.id,
-          title: doc.title,
+
+        if (pvError) throw pvError;
+
+        // Format PVs for display
+        const formattedPVs = pvData.map(pv => ({
+          id: pv.id,
+          title: pv.title,
           type: 'pv',
-          status: doc.status,
-          date: doc.created_at,
-          project: doc.projects?.name || 'N/A',
-          project_id: doc.project_id,
-          file_path: doc.file_path
+          status: pv.status,
+          date: pv.created_at,
+          project: pv.projects?.name || 'N/A',
+          project_id: pv.project_id,
+          file_path: pv.file_path,
+          description: pv.description
         }));
-        
-        setUser({
-          id: userData.id,
-          name: `${userData.first_name || ''} ${userData.last_name || ''}`.trim() || userData.email,
-          email: userData.email,
-          phone: userData.phone || '',
-          company: userData.company || '',
-          status: userData.status || 'active',
-          role: userData.role
-        });
-        
-        setDocuments(formattedDocuments);
-        setLoading(false);
+
+        setDocuments(formattedPVs);
       } catch (err) {
-        console.error('Erreur lors du chargement des données:', err)
-        setError(`Erreur: ${err.message}`)
-        setLoading(false)
+        console.error('Error loading data:', err);
+        setError(err.message);
+      } finally {
+        setLoading(false);
       }
-      
-      // Marquer les données comme chargées
-      dataFetchedRef.current = true
     }
-    
-    if (userId) {
-      fetchData()
-    }
-    
-    // Nettoyage lors du démontage du composant
-    return () => {
-      dataFetchedRef.current = false
-    }
-  }, [userId])
+
+    loadData();
+  }, [userId]);
 
   // État pour le modal de création de PV
   const [showCreatePVModal, setShowCreatePVModal] = useState(false)
   const [newPV, setNewPV] = useState({
     title: '',
-    project: '',
+    project_id: '',  // Changed from project to project_id
     description: '',
     file: null
   })
@@ -174,6 +171,10 @@ function UserDocuments() {
         throw new Error(`Erreur lors de l'upload du fichier: ${uploadError.message}`);
       }
       
+      // Calculer la date d'échéance (30 jours à partir d'aujourd'hui)
+      const dueDate = new Date();
+      dueDate.setDate(dueDate.getDate() + 30);
+      
       // Créer l'entrée PV dans la base de données
       const { data: pvData, error: pvError } = await supabaseClient
         .from('pv')
@@ -184,7 +185,8 @@ function UserDocuments() {
             status: 'En attente de signature',
             file_path: filePath,
             client_id: clientData.id,
-            project_id: newPV.project_id || null // Si un projet est sélectionné
+            project_id: newPV.project_id,  // Using project_id directly
+            due_date: dueDate.toISOString()
           }
         ])
         .select()
@@ -201,7 +203,7 @@ function UserDocuments() {
         type: 'pv',
         status: pvData.status,
         date: pvData.created_at,
-        project: newPV.project || 'N/A',
+        project: projects.find(p => p.id === pvData.project_id)?.name || 'N/A',  // Get project name from projects list
         project_id: pvData.project_id,
         file_path: pvData.file_path
       };
@@ -212,7 +214,7 @@ function UserDocuments() {
       // Réinitialiser le formulaire
       setNewPV({
         title: '',
-        project: '',
+        project_id: '',  // Reset project_id instead of project
         description: '',
         file: null
       });
@@ -259,6 +261,14 @@ function UserDocuments() {
     }
   };
 
+  if (loading) {
+    return (
+      <div className="flex justify-center items-center h-64">
+        <div className="animate-spin rounded-full h-12 w-12 border-t-2 border-b-2 border-void"></div>
+      </div>
+    );
+  }
+
   if (error) {
     return (
       <div className="p-6 bg-red-50 rounded-lg">
@@ -300,6 +310,7 @@ function UserDocuments() {
           onFileChange={handleFileChange}
           onSubmit={handleCreatePV}
           onCancel={() => setShowCreatePVModal(false)}
+          projects={projects}
         />
       )}
     </div>

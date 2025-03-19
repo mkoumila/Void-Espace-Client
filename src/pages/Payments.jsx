@@ -142,22 +142,16 @@ function Payments() {
   }
 
   return (
-    <div className="space-y-6">
-      <div className="flex justify-between items-center">
-        <h1 className="text-2xl font-bold text-gray-900">Suivi des paiements</h1>
-      </div>
-
-      <div className="shadow rounded-lg overflow-hidden">
+    <>
+      <h1 className="text-2xl font-bold text-gray-900 mb-8">Suivi des paiements</h1>
+      <div className="shadow rounded-lg bg-white overflow-hidden">
         {payments.length === 0 ? (
-          <div className="p-6 text-center">
-            <div className="flex flex-col items-center">
+          
+            <div className="bg-white p-10 flex flex-col items-center">
               <DocumentTextIcon className="h-12 w-12 text-gray-400 mb-4" />
-              <p className="text-gray-500 text-lg">Aucun paiement disponible</p>
-              <p className="text-gray-400 text-sm mt-2">
-                Vous n'avez pas encore de paiements à suivre.
-              </p>
+              <p className="mt-2 text-gray-500">Aucun paiement disponible</p>
             </div>
-          </div>
+          
         ) : (
           <div className="flex flex-col gap-4">
             {payments.map((payment) => (
@@ -370,7 +364,7 @@ function Payments() {
           </div>
         </div>
       )}
-    </div>
+    </>
   )
 }
 

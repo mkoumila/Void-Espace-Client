@@ -5,6 +5,7 @@ import {
   CurrencyEuroIcon,
   ClockIcon,
   PlusIcon,
+  DocumentTextIcon,
 } from '@heroicons/react/24/outline'
 import { useAuth } from '../api/AuthContext'
 import * as quoteService from '../api/quoteService'
@@ -165,8 +166,9 @@ function Quotes() {
           <p className="text-red-600">{error}</p>
         </div>
       ) : quotes.length === 0 ? (
-        <div className="text-center py-10 bg-white rounded-lg shadow-sm border border-gray-200">
-          <p className="text-gray-500">Aucun devis trouvé.</p>
+        <div className="bg-white p-10 flex flex-col items-center">
+          <DocumentTextIcon className="h-12 w-12 text-gray-400 mb-4" />
+          <p className="mt-2 text-gray-500">Aucun devis disponible</p>
         </div>
       ) : (
         <div className="space-y-6">

@@ -1,6 +1,6 @@
-import { useState } from 'react'
-import { Link } from 'react-router-dom'
-import { 
+import { useState } from "react";
+import { Link } from "react-router-dom";
+import {
   DocumentCheckIcon,
   DocumentPlusIcon,
   FunnelIcon,
@@ -8,39 +8,48 @@ import {
   MagnifyingGlassIcon,
   ChevronLeftIcon,
   ChevronRightIcon,
-  EyeIcon
-} from '@heroicons/react/24/outline'
-
-import DocumentDetails from './DocumentDetails'
+  EyeIcon,
+} from "@heroicons/react/24/outline";
+import supabaseClient from "../../../api/supabaseClient";
+import { downloadPVFile } from "../../../api/pvService";
+import DocumentDetails from "./DocumentDetails";
 
 function DocumentsTab({ user, documents, onCreatePV, onUpdateDocument }) {
-  const [documentsPage, setDocumentsPage] = useState(1)
-  const [documentsPerPage] = useState(3)
-  const [documentSearchQuery, setDocumentSearchQuery] = useState('')
-  const [documentStatusFilter, setDocumentStatusFilter] = useState('all')
-  const [documentProjectFilter, setDocumentProjectFilter] = useState('all')
-  const [selectedDocument, setSelectedDocument] = useState(null)
-  
+  const [documentsPage, setDocumentsPage] = useState(1);
+  const [documentsPerPage] = useState(3);
+  const [documentSearchQuery, setDocumentSearchQuery] = useState("");
+  const [documentStatusFilter, setDocumentStatusFilter] = useState("all");
+  const [documentProjectFilter, setDocumentProjectFilter] = useState("all");
+  const [selectedDocument, setSelectedDocument] = useState(null);
+
   // Filtrage des documents
-  const filteredDocuments = documents.filter(doc => {
-    const matchesSearch = doc.title.toLowerCase().includes(documentSearchQuery.toLowerCase()) ||
-                         doc.project.toLowerCase().includes(documentSearchQuery.toLowerCase());
-    const matchesStatus = documentStatusFilter === 'all' || 
-                         (documentStatusFilter === 'signed' && doc.status === 'signed') ||
-                         (documentStatusFilter === 'pending' && doc.status === 'pending');
-    const matchesProject = documentProjectFilter === 'all' || doc.project === documentProjectFilter;
-    
+  const filteredDocuments = documents.filter((doc) => {
+    const matchesSearch =
+      doc.title.toLowerCase().includes(documentSearchQuery.toLowerCase()) ||
+      doc.project.toLowerCase().includes(documentSearchQuery.toLowerCase());
+    const matchesStatus =
+      documentStatusFilter === "all" ||
+      (documentStatusFilter === "signed" && doc.status === "Signé") ||
+      (documentStatusFilter === "pending" && doc.status === "En attente de signature");
+    const matchesProject =
+      documentProjectFilter === "all" || doc.project === documentProjectFilter;
+
     return matchesSearch && matchesStatus && matchesProject;
   });
-  
+
   // Pagination des documents
   const indexOfLastDocument = documentsPage * documentsPerPage;
   const indexOfFirstDocument = indexOfLastDocument - documentsPerPage;
-  const currentDocuments = filteredDocuments.slice(indexOfFirstDocument, indexOfLastDocument);
-  const totalDocumentsPages = Math.ceil(filteredDocuments.length / documentsPerPage);
+  const currentDocuments = filteredDocuments.slice(
+    indexOfFirstDocument,
+    indexOfLastDocument
+  );
+  const totalDocumentsPages = Math.ceil(
+    filteredDocuments.length / documentsPerPage
+  );
 
   // Liste des projets uniques pour le filtre
-  const uniqueProjects = [...new Set(documents.map(doc => doc.project))];
+  const uniqueProjects = [...new Set(documents.map((doc) => doc.project))];
 
   // Fonction pour gérer la mise à jour d'un document
   const handleDocumentUpdate = (updatedDocument) => {
@@ -49,6 +58,36 @@ function DocumentsTab({ user, documents, onCreatePV, onUpdateDocument }) {
     // Propager la mise à jour au composant parent
     if (onUpdateDocument) {
       onUpdateDocument(updatedDocument);
+    }
+  };
+
+  const handleDownload = async (filePath) => {
+    try {
+      const { data, error } = await downloadPVFile(filePath);
+      
+      if (error) throw error;
+
+      // Create a blob from the file data
+      const blob = new Blob([data], { type: "application/pdf" });
+
+      // Create a URL for the blob
+      const url = window.URL.createObjectURL(blob);
+
+      // Create a temporary link element
+      const link = document.createElement("a");
+      link.href = url;
+      link.download = filePath; // Use the original filename
+
+      // Append to body, click, and remove
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+
+      // Clean up the URL
+      window.URL.revokeObjectURL(url);
+    } catch (error) {
+      console.error("Error downloading file:", error);
+      alert("Erreur lors du téléchargement du fichier");
     }
   };
 
@@ -80,7 +119,7 @@ function DocumentsTab({ user, documents, onCreatePV, onUpdateDocument }) {
               placeholder="Rechercher par titre ou projet..."
             />
           </div>
-          
+
           <div className="flex items-center space-x-2">
             <FunnelIcon className="h-5 w-5 text-gray-400" />
             <select
@@ -88,12 +127,12 @@ function DocumentsTab({ user, documents, onCreatePV, onUpdateDocument }) {
               onChange={(e) => setDocumentStatusFilter(e.target.value)}
               className="rounded-md border-gray-300 text-sm focus:ring-void focus:border-void"
             >
-              <option value="all">Tous les statuts</option>
+              <option value="all">Tous les status</option>
               <option value="signed">Signés</option>
               <option value="pending">En attente</option>
             </select>
           </div>
-          
+
           <div className="flex items-center space-x-2">
             <FolderIcon className="h-5 w-5 text-gray-400" />
             <select
@@ -102,8 +141,10 @@ function DocumentsTab({ user, documents, onCreatePV, onUpdateDocument }) {
               className="rounded-md border-gray-300 text-sm focus:ring-void focus:border-void"
             >
               <option value="all">Tous les projets</option>
-              {uniqueProjects.map(project => (
-                <option key={project} value={project}>{project}</option>
+              {uniqueProjects.map((project) => (
+                <option key={project} value={project}>
+                  {project}
+                </option>
               ))}
             </select>
           </div>
@@ -114,8 +155,8 @@ function DocumentsTab({ user, documents, onCreatePV, onUpdateDocument }) {
       <div className="bg-white rounded-lg shadow-sm border border-gray-200 overflow-hidden">
         {currentDocuments.length > 0 ? (
           <div className="divide-y divide-gray-200">
-            {currentDocuments.map(doc => (
-              <div 
+            {currentDocuments.map((doc) => (
+              <div
                 key={doc.id}
                 className="flex items-center justify-between p-4 hover:bg-gray-50"
               >
@@ -124,8 +165,12 @@ function DocumentsTab({ user, documents, onCreatePV, onUpdateDocument }) {
                   <div>
                     <h4 className="font-medium text-gray-900">{doc.title}</h4>
                     <div className="flex items-center space-x-3 mt-1">
-                      <p className="text-sm text-gray-500">Projet : {doc.project}</p>
-                      <p className="text-sm text-gray-500">Créé le {new Date(doc.date).toLocaleDateString()}</p>
+                      <p className="text-sm text-gray-500">
+                        Projet : {doc.project}
+                      </p>
+                      <p className="text-sm text-gray-500">
+                        Créé le {new Date(doc.date).toLocaleDateString()}
+                      </p>
                     </div>
                     {doc.signedAt && (
                       <p className="text-sm text-green-600 mt-1">
@@ -142,15 +187,12 @@ function DocumentsTab({ user, documents, onCreatePV, onUpdateDocument }) {
                     <EyeIcon className="h-4 w-4 mr-1" />
                     Détails
                   </button>
-                  <a
-                    href={doc.fileUrl}
-                    target="_blank"
-                    rel="noopener noreferrer"
+                  <button
+                    onClick={() => handleDownload(doc.file_path)}
                     className="inline-flex items-center px-3 py-1.5 border border-gray-300 rounded-md text-sm font-medium text-gray-700 bg-white hover:bg-gray-50"
                   >
                     Télécharger
-                  </a>
-                  
+                  </button>
                 </div>
               </div>
             ))}
@@ -160,7 +202,7 @@ function DocumentsTab({ user, documents, onCreatePV, onUpdateDocument }) {
             Aucun document trouvé
           </div>
         )}
-        
+
         {/* Pagination */}
         {filteredDocuments.length > 0 && (
           <div className="bg-gray-50 px-4 py-3 flex items-center justify-between border-t border-gray-200 sm:px-6">
@@ -173,7 +215,11 @@ function DocumentsTab({ user, documents, onCreatePV, onUpdateDocument }) {
                 Précédent
               </button>
               <button
-                onClick={() => setDocumentsPage(Math.min(totalDocumentsPages, documentsPage + 1))}
+                onClick={() =>
+                  setDocumentsPage(
+                    Math.min(totalDocumentsPages, documentsPage + 1)
+                  )
+                }
                 disabled={documentsPage === totalDocumentsPages}
                 className="ml-3 relative inline-flex items-center px-4 py-2 border border-gray-300 text-sm font-medium rounded-md text-gray-700 bg-white hover:bg-gray-50"
               >
@@ -183,17 +229,30 @@ function DocumentsTab({ user, documents, onCreatePV, onUpdateDocument }) {
             <div className="hidden sm:flex-1 sm:flex sm:items-center sm:justify-between">
               <div>
                 <p className="text-sm text-gray-700">
-                  Affichage de <span className="font-medium">{indexOfFirstDocument + 1}</span> à{' '}
+                  Affichage de{" "}
+                  <span className="font-medium">
+                    {indexOfFirstDocument + 1}
+                  </span>{" "}
+                  à{" "}
                   <span className="font-medium">
                     {Math.min(indexOfLastDocument, filteredDocuments.length)}
-                  </span>{' '}
-                  sur <span className="font-medium">{filteredDocuments.length}</span> documents
+                  </span>{" "}
+                  sur{" "}
+                  <span className="font-medium">
+                    {filteredDocuments.length}
+                  </span>{" "}
+                  documents
                 </p>
               </div>
               <div>
-                <nav className="relative z-0 inline-flex rounded-md shadow-sm -space-x-px" aria-label="Pagination">
+                <nav
+                  className="relative z-0 inline-flex rounded-md shadow-sm -space-x-px"
+                  aria-label="Pagination"
+                >
                   <button
-                    onClick={() => setDocumentsPage(Math.max(1, documentsPage - 1))}
+                    onClick={() =>
+                      setDocumentsPage(Math.max(1, documentsPage - 1))
+                    }
                     disabled={documentsPage === 1}
                     className="relative inline-flex items-center px-2 py-2 rounded-l-md border border-gray-300 bg-white text-sm font-medium text-gray-500 hover:bg-gray-50"
                   >
@@ -206,15 +265,19 @@ function DocumentsTab({ user, documents, onCreatePV, onUpdateDocument }) {
                       onClick={() => setDocumentsPage(i + 1)}
                       className={`relative inline-flex items-center px-4 py-2 border text-sm font-medium ${
                         documentsPage === i + 1
-                          ? 'z-10 bg-void border-void text-white'
-                          : 'bg-white border-gray-300 text-gray-500 hover:bg-gray-50'
+                          ? "z-10 bg-void border-void text-white"
+                          : "bg-white border-gray-300 text-gray-500 hover:bg-gray-50"
                       }`}
                     >
                       {i + 1}
                     </button>
                   ))}
                   <button
-                    onClick={() => setDocumentsPage(Math.min(totalDocumentsPages, documentsPage + 1))}
+                    onClick={() =>
+                      setDocumentsPage(
+                        Math.min(totalDocumentsPages, documentsPage + 1)
+                      )
+                    }
                     disabled={documentsPage === totalDocumentsPages}
                     className="relative inline-flex items-center px-2 py-2 rounded-r-md border border-gray-300 bg-white text-sm font-medium text-gray-500 hover:bg-gray-50"
                   >
@@ -230,8 +293,8 @@ function DocumentsTab({ user, documents, onCreatePV, onUpdateDocument }) {
 
       {/* Modal de détails du document */}
       {selectedDocument && (
-        <DocumentDetails 
-          document={selectedDocument} 
+        <DocumentDetails
+          document={selectedDocument}
           onClose={() => setSelectedDocument(null)}
           onUpdateDocument={handleDocumentUpdate}
         />
@@ -240,4 +303,4 @@ function DocumentsTab({ user, documents, onCreatePV, onUpdateDocument }) {
   );
 }
 
-export default DocumentsTab; 
+export default DocumentsTab;

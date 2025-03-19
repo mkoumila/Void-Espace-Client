@@ -104,14 +104,18 @@ CREATE TABLE IF NOT EXISTS payments (
 CREATE TABLE IF NOT EXISTS pv (
   id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
   title TEXT NOT NULL,
-  description TEXT,
-  status pv_status NOT NULL DEFAULT 'En attente de signature',
-  signature_date DATE,
-  file_path TEXT,
+  project_id UUID REFERENCES projects(id) ON DELETE CASCADE,
   client_id UUID NOT NULL REFERENCES clients(id) ON DELETE CASCADE,
-  project_id UUID NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
-  created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
-  updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+  description TEXT,
+  file_path TEXT,
+  signed_file_path TEXT,
+  status pv_status DEFAULT 'En attente de signature',
+  created_by UUID REFERENCES auth.users(id) ON DELETE CASCADE,
+  created_at TIMESTAMP WITH TIME ZONE DEFAULT TIMEZONE('utc'::text, NOW()) NOT NULL,
+  updated_at TIMESTAMP WITH TIME ZONE DEFAULT TIMEZONE('utc'::text, NOW()) NOT NULL,
+  due_date TIMESTAMP WITH TIME ZONE NOT NULL,
+  signed_at TIMESTAMP WITH TIME ZONE,
+  signed_by UUID REFERENCES auth.users(id) ON DELETE SET NULL
 );
 
 -- TMA (Tierce Maintenance Applicative) Table
@@ -552,23 +556,17 @@ CREATE POLICY "Admins can delete payments"
 -- Clients can view and sign their own PVs
 CREATE POLICY "Clients can view their own PVs"
   ON pv FOR SELECT
-  USING (EXISTS (
-    SELECT 1 FROM clients 
-    WHERE clients.id = pv.client_id AND clients.user_id = auth.uid()
+  USING (client_id IN (
+    SELECT id FROM clients WHERE user_id = auth.uid()
   ));
 
--- FIXED: Clients can sign their own PVs (removed OLD references)
 CREATE POLICY "Clients can sign their own PVs"
   ON pv FOR UPDATE
-  USING (
-    EXISTS (
-      SELECT 1 FROM clients 
-      WHERE clients.id = pv.client_id AND clients.user_id = auth.uid()
-    )
-  )
+  USING (client_id IN (
+    SELECT id FROM clients WHERE user_id = auth.uid()
+  ))
   WITH CHECK (
-    -- Only allow changing status to signed and setting signature date
-    status = 'Signé' AND signature_date IS NOT NULL
+    status = 'Signé' AND signed_at IS NOT NULL
   );
 
 -- Admins can view, create, and edit all PVs
@@ -1381,3 +1379,29 @@ $$ LANGUAGE plpgsql SECURITY DEFINER;
 
 -- Grant execute permission to authenticated users
 GRANT EXECUTE ON FUNCTION public.debug_quote_validation_permission(UUID) TO authenticated;
+
+-- Create pv_followups table
+CREATE TABLE IF NOT EXISTS pv_followups (
+  id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+  pv_id UUID REFERENCES pv(id) ON DELETE CASCADE,
+  type TEXT NOT NULL CHECK (type IN ('email', 'phone')),
+  comment TEXT,
+  created_by UUID REFERENCES auth.users(id) ON DELETE CASCADE,
+  created_at TIMESTAMP WITH TIME ZONE DEFAULT TIMEZONE('utc'::text, NOW()) NOT NULL,
+  updated_at TIMESTAMP WITH TIME ZONE DEFAULT TIMEZONE('utc'::text, NOW()) NOT NULL
+);
+
+-- Add RLS policies for pv_followups
+ALTER TABLE pv_followups ENABLE ROW LEVEL SECURITY;
+
+CREATE POLICY "Users can view their own pv followups"
+  ON pv_followups FOR SELECT
+  USING (created_by = auth.uid());
+
+CREATE POLICY "Users can create pv followups"
+  ON pv_followups FOR INSERT
+  WITH CHECK (created_by = auth.uid());
+
+-- Add indexes for pv_followups
+CREATE INDEX IF NOT EXISTS idx_pv_followups_pv_id ON pv_followups(pv_id);
+CREATE INDEX IF NOT EXISTS idx_pv_followups_created_by ON pv_followups(created_by);

@@ -1,5 +1,6 @@
 import { Link } from 'react-router-dom'
 import { ArrowLeftIcon, EnvelopeIcon, PhoneIcon, BuildingOfficeIcon, MapPinIcon } from '@heroicons/react/24/outline'
+import { ShieldCheckIcon, UserIcon, BuildingOffice2Icon } from '@heroicons/react/24/outline'
 
 function UserHeader({ user, loading }) {
   if (loading) {
@@ -20,6 +21,42 @@ function UserHeader({ user, loading }) {
     );
   }
 
+  // Format user name correctly regardless of data format
+  const userName = user.name || 
+    (user.first_name && user.last_name ? `${user.first_name} ${user.last_name}` : 
+    (user.first_name || user.last_name || 'Utilisateur'));
+    
+  // Default status to 'active' if not provided
+  const userStatus = user.status || 'active';
+
+  // Helper function to render role badge with icon
+  const renderRoleBadge = (role) => {
+    // Default to client role
+    let badgeClass = "px-2 py-1 inline-flex items-center text-xs leading-5 font-semibold rounded-full bg-green-100 text-green-800";
+    let iconClass = "h-4 w-4 text-green-500";
+    let icon = <UserIcon className={iconClass} />;
+    let label = "Client";
+
+    if (role === 'Administrateur' || role === 'admin') {
+      badgeClass = "px-2 py-1 inline-flex items-center text-xs leading-5 font-semibold rounded-full bg-purple-100 text-purple-800";
+      iconClass = "h-4 w-4 text-purple-500";
+      icon = <ShieldCheckIcon className={iconClass} />;
+      label = "Administrateur";
+    } else if (role === 'gestionnaire' || role === 'manager') {
+      badgeClass = "px-2 py-1 inline-flex items-center text-xs leading-5 font-semibold rounded-full bg-blue-100 text-blue-800";
+      iconClass = "h-4 w-4 text-blue-500";
+      icon = <BuildingOffice2Icon className={iconClass} />;
+      label = "Gestionnaire";
+    }
+
+    return (
+      <span className={badgeClass}>
+        {icon}
+        <span className="ml-1">{label}</span>
+      </span>
+    );
+  };
+
   return (
     <div className="bg-white rounded-lg shadow p-6 mb-6">
       <div className="flex items-center justify-between mb-4">
@@ -28,7 +65,7 @@ function UserHeader({ user, loading }) {
             <ArrowLeftIcon className="h-6 w-6" />
           </Link>
           <div>
-            <h1 className="text-2xl font-bold text-gray-900">{user.name}</h1>
+            <h1 className="text-2xl font-bold text-gray-900">{userName}</h1>
             <div className="flex flex-wrap gap-3 text-sm text-gray-500 mt-1">
               <div className="flex items-center">
                 <EnvelopeIcon className="h-4 w-4 mr-1" />
@@ -50,26 +87,17 @@ function UserHeader({ user, loading }) {
           </div>
         </div>
         <div className="flex items-center space-x-2">
-          {user.status && (
-            <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium ${
-              user.status === 'active' ? 'bg-green-100 text-green-800' : 'bg-gray-100 text-gray-800'
-            }`}>
-              {user.status === 'active' ? 'Actif' : 'Inactif'}
-            </span>
-          )}
-          {user.role && (
-            <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium ${
-              user.role === 'Administrateur' ? 'bg-purple-100 text-purple-800' :
-              user.role === 'Gestionnaire' ? 'bg-blue-100 text-blue-800' :
-              'bg-green-100 text-green-800'
-            }`}>
-              {user.role}
-            </span>
-          )}
+          {/* Always show status badge */}
+          <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium ${
+            userStatus === 'active' ? 'bg-green-100 text-green-800' : 'bg-gray-100 text-gray-800'
+          }`}>
+            {userStatus === 'active' ? 'Actif' : 'Inactif'}
+          </span>
+          {user.role && renderRoleBadge(user.role)}
         </div>
       </div>
       
-      {/* Address information */}
+      {/* Address information - only show if at least one address field exists */}
       {(user.address || user.city || user.postal_code) && (
         <div className="mt-2 text-sm text-gray-600">
           <div className="flex items-start">

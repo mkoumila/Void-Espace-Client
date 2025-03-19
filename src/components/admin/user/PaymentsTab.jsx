@@ -763,9 +763,9 @@ function PaymentsTab({ user, payments, onUpdatePayment, onCreatePayment }) {
                         ) : (
                           <div className="text-center py-4">
                             <p className="text-sm text-gray-500">Aucun relancement enregistré</p>
-                          </div>
-                        )}
-                      </div>
+          </div>
+        )}
+      </div>
                     </div>
                   </div>
                 </div>
