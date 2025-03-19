@@ -9,10 +9,13 @@ import {
   EnvelopeIcon,
   PhoneIcon,
   UserIcon,
-  DocumentTextIcon
+  DocumentTextIcon,
+  CheckCircleIcon,
+  XCircleIcon
 } from '@heroicons/react/24/outline'
 import { fetchUserPVs, updatePV, uploadSignedPVFile } from '../api/pvService'
 import { useAuth } from '../api/AuthContext'
+import supabaseClient from '../api/supabaseClient'
 
 function SignaturePV() {
   const { user: currentUser } = useAuth()
@@ -24,12 +27,42 @@ function SignaturePV() {
   const [error, setError] = useState(null)
   const [uploadingPvId, setUploadingPvId] = useState(null)
   const [uploadError, setUploadError] = useState(null)
+  const [uploadSuccess, setUploadSuccess] = useState(null)
 
   useEffect(() => {
     if (currentUser?.id) {
       loadPVs(currentUser.id)
+      migrateLocalStorageFilesToSupabase()
+      
+      // Debug localStorage
+      const allKeys = Object.keys(localStorage);
+      console.log("On component mount - All localStorage keys:", allKeys);
+      
+      // Filter for signed PV keys
+      const signedPvKeys = allKeys.filter(key => key.startsWith('signed_pv_'));
+      console.log("Signed PV keys in localStorage:", signedPvKeys);
     }
   }, [currentUser])
+
+  // Clear success message after 5 seconds
+  useEffect(() => {
+    if (uploadSuccess) {
+      const timer = setTimeout(() => {
+        setUploadSuccess(null);
+      }, 5000);
+      return () => clearTimeout(timer);
+    }
+  }, [uploadSuccess]);
+
+  // Clear error message after 5 seconds
+  useEffect(() => {
+    if (uploadError) {
+      const timer = setTimeout(() => {
+        setUploadError(null);
+      }, 5000);
+      return () => clearTimeout(timer);
+    }
+  }, [uploadError]);
 
   const loadPVs = async (userId) => {
     try {
@@ -42,7 +75,22 @@ function SignaturePV() {
       }
       
       const data = await fetchUserPVs(userId)
-      setPVs(data)
+      console.log("PVs loaded:", data); // Log all PVs for debugging
+      
+      // Map data to ensure consistent field names
+      const processedData = data.map(pv => {
+        // If we have signed_at but not signedAt, copy the value
+        if (pv.signed_at && !pv.signedAt) {
+          pv.signedAt = pv.signed_at;
+        }
+        // If we have signedAt but not signed_at, copy the value
+        if (pv.signedAt && !pv.signed_at) {
+          pv.signed_at = pv.signedAt;
+        }
+        return pv;
+      });
+      
+      setPVs(processedData)
     } catch (err) {
       setError(err.message || "Une erreur est survenue lors du chargement des documents")
     } finally {
@@ -55,23 +103,37 @@ function SignaturePV() {
       const file = e.target.files[0];
       setUploadingPvId(pvId);
       setUploadError(null);
+      setUploadSuccess(null);
       
       try {
+        // Check if we're replacing an existing signed file
+        const currentPV = pvs.find(pv => pv.id === pvId);
+        const oldFilePath = currentPV?.signed_file_path;
+        const isReplacing = oldFilePath ? true : false;
+        
+        // If replacing, and it's a localStorage file, remove the old one
+        if (isReplacing && oldFilePath.startsWith('local_signed_')) {
+          localStorage.removeItem(`signed_pv_${oldFilePath}`);
+        }
+        
         // Upload the signed file
-        const { filePath } = await uploadSignedPVFile(file, pvId);
-
-        // Update the PV status
-        await updatePV(pvId, {
-          status: 'Signé',
-          signed_file_path: filePath,
-          signed_at: new Date().toISOString(),
-          signed_by: currentUser.id
-        });
-
+        const result = await uploadSignedPVFile(file, pvId);
+        
+        if (!result.success) {
+          throw new Error("Upload failed");
+        }
+        
         // Reload PVs to update the UI
-        loadPVs(currentUser.id);
+        await loadPVs(currentUser.id);
+        
+        // Show success message
+        if (isReplacing) {
+          setUploadSuccess(`Le document signé a été remplacé avec succès par "${file.name}"`);
+        } else {
+          setUploadSuccess(`Document "${file.name}" marqué comme signé avec succès`);
+        }
       } catch (err) {
-        setUploadError(err.message);
+        setUploadError(err.message || "Une erreur est survenue lors du téléversement du fichier");
       } finally {
         setUploadingPvId(null);
       }
@@ -95,6 +157,151 @@ function SignaturePV() {
   const isOverdue = (dueDate, status) => {
     return new Date(dueDate) < new Date() && status !== 'Signé';
   }
+
+  // Function to download files from Supabase storage
+  const downloadFile = async (filePath) => {
+    try {
+      if (!filePath) {
+        alert("Aucun fichier n'est disponible");
+        return;
+      }
+      
+      console.log("Downloading file from Supabase storage:", filePath);
+      
+      // Check if this is a legacy localStorage path (from older implementation)
+      if (filePath.startsWith('local_signed_')) {
+        alert("Ce fichier doit être téléversé à nouveau car il était stocké dans une ancienne version du système. Veuillez le téléverser à nouveau.");
+        return;
+      }
+      
+      // Try to download from Supabase storage
+      const tryBuckets = ['pv_files', 'public', 'files'];
+      let downloadUrl = null;
+      
+      // Try each bucket until we get a successful signed URL
+      for (const bucket of tryBuckets) {
+        try {
+          const { data, error: bucketError } = await supabaseClient
+            .storage
+            .from(bucket)
+            .createSignedUrl(filePath, 60);
+            
+          if (!bucketError && data) {
+            downloadUrl = data.signedUrl;
+            console.log(`File found in bucket '${bucket}'`);
+            break;
+          }
+        } catch (err) {
+          console.log(`Failed to get file from bucket '${bucket}':`, err.message);
+          // Continue to the next bucket
+        }
+      }
+      
+      if (downloadUrl) {
+        window.open(downloadUrl, '_blank');
+      } else {
+        throw new Error("Impossible de générer un lien de téléchargement");
+      }
+    } catch (error) {
+      console.error("Erreur de téléchargement:", error);
+      alert("Erreur lors du téléchargement du fichier: " + error.message);
+    }
+  };
+
+  // Function to migrate any existing localStorage files to Supabase
+  const migrateLocalStorageFilesToSupabase = async () => {
+    try {
+      // Check for localStorage items that need migration
+      const allKeys = Object.keys(localStorage);
+      const signedPvKeys = allKeys.filter(key => key.startsWith('signed_pv_local_signed_'));
+      
+      if (signedPvKeys.length === 0) {
+        console.log("No localStorage files to migrate");
+        return;
+      }
+      
+      console.log("Found localStorage files to migrate:", signedPvKeys.length);
+      
+      // For each localStorage item, extract PV ID and migrate to Supabase
+      for (const key of signedPvKeys) {
+        try {
+          // Extract PV ID from localStorage key
+          const localPathKey = key.replace('signed_pv_', '');
+          const pvIdMatch = localPathKey.match(/local_signed_([^_]+)_/);
+          
+          if (!pvIdMatch || !pvIdMatch[1]) {
+            console.log("Could not extract PV ID from key:", key);
+            continue;
+          }
+          
+          const pvId = pvIdMatch[1];
+          const base64Data = localStorage.getItem(key);
+          
+          if (!base64Data) {
+            console.log("No data found for key:", key);
+            continue;
+          }
+          
+          console.log("Migrating file for PV:", pvId);
+          
+          // Convert base64 to file
+          const base64Response = await fetch(base64Data);
+          const blob = await base64Response.blob();
+          const file = new File([blob], `migrated_${pvId}.pdf`, { type: 'application/pdf' });
+          
+          // Find the PV in state
+          const pv = pvs.find(p => p.id === pvId);
+          if (!pv) {
+            console.log("Could not find PV with ID:", pvId);
+            continue;
+          }
+          
+          // Upload to Supabase using the normal upload function
+          await uploadSignedPVFile(file, pvId);
+          
+          // Remove the localStorage item
+          localStorage.removeItem(key);
+          console.log("Migration complete for PV:", pvId);
+        } catch (error) {
+          console.error("Error migrating file:", error);
+        }
+      }
+      
+      // Reload PVs after migration
+      await loadPVs(currentUser.id);
+      
+    } catch (error) {
+      console.error("Error in migration process:", error);
+    }
+  };
+
+  useEffect(() => {
+    // Clear any remaining localStorage/sessionStorage entries
+    const cleanupStorage = () => {
+      // Get all localStorage keys
+      const localStorageKeys = Object.keys(localStorage);
+      const sessionStorageKeys = Object.keys(sessionStorage);
+      
+      // Remove any PV-related entries from localStorage
+      localStorageKeys.forEach(key => {
+        if (key.includes('local_signed_') || key.includes('pv_') || key.includes('signed_')) {
+          localStorage.removeItem(key);
+        }
+      });
+      
+      // Remove any PV-related entries from sessionStorage
+      sessionStorageKeys.forEach(key => {
+        if (key.includes('local_signed_') || key.includes('pv_') || key.includes('signed_')) {
+          sessionStorage.removeItem(key);
+        }
+      });
+      
+      console.log('Storage cleanup completed');
+    };
+    
+    cleanupStorage();
+    loadPVs(currentUser.id);
+  }, [currentUser.id]);
 
   if (loading) {
     return (
@@ -144,6 +351,26 @@ function SignaturePV() {
     <>
       <h1 className="text-2xl font-bold text-gray-900 mb-8">Documents à signer</h1>
 
+      {/* Success message */}
+      {uploadSuccess && (
+        <div className="mb-4 bg-green-50 border border-green-100 rounded-md p-4">
+          <div className="flex">
+            <CheckCircleIcon className="h-5 w-5 text-green-400 mr-2" />
+            <span className="text-green-800">{uploadSuccess}</span>
+          </div>
+        </div>
+      )}
+
+      {/* Error message */}
+      {uploadError && (
+        <div className="mb-4 bg-red-50 border border-red-100 rounded-md p-4">
+          <div className="flex">
+            <XCircleIcon className="h-5 w-5 text-red-400 mr-2" />
+            <span className="text-red-800">{uploadError}</span>
+          </div>
+        </div>
+      )}
+
       <div className="rounded-lg shadow overflow-hidden">
         {pvs.length === 0 ? (
           <div className="bg-white p-10 flex flex-col items-center">
@@ -167,40 +394,49 @@ function SignaturePV() {
                         <span className="ml-2 text-red-500">(En retard)</span>
                       }
                     </p>
+                    {/* Display signed status indicator if signed */}
+                    {pv.status === 'Signé' && (
+                      <p className="text-sm text-green-600 mt-1">
+                        <CheckCircleIcon className="h-4 w-4 inline mr-1" />
+                        Document signé le {formatDate(pv.signed_at || pv.signedAt)}
+                      </p>
+                    )}
                   </div>
                   <div className="flex items-center space-x-3">
-                    {/* Download PV button */}
-                    <a
-                      href={pv.file_path}
-                      target="_blank"
-                      rel="noopener noreferrer"
+                    {/* Download PV button - ALWAYS downloads original PV from file_path */}
+                    <button
+                      onClick={() => {
+                        if (pv.file_path) {
+                          downloadFile(pv.file_path);
+                        } else if (pv.file_url) {
+                          window.open(pv.file_url, '_blank');
+                        }
+                      }}
                       className="inline-flex items-center px-4 py-2 border border-transparent rounded-md shadow-sm text-sm font-medium text-white bg-void hover:bg-void-light focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-void"
                     >
                       <ArrowDownTrayIcon className="h-5 w-5 mr-2" />
                       Télécharger le PV
-                    </a>
+                    </button>
                     
-                    {/* Upload signed PV button */}
-                    {pv.status !== 'Signé' && (
-                      <div className="relative">
-                        <input 
-                          id={`signed-doc-${pv.id}`} 
-                          className="sr-only"
-                          accept=".pdf"
-                          type="file"
-                          onChange={(e) => handleFileChange(e, pv.id)}
-                          disabled={uploadingPvId === pv.id}
-                        />
-                        <label 
-                          htmlFor={`signed-doc-${pv.id}`}
-                          className={`inline-flex items-center px-4 py-2 border rounded-md shadow-sm text-sm font-medium 
-                          border-void text-void bg-white hover:bg-gray-50 ${uploadingPvId === pv.id ? 'opacity-50 cursor-not-allowed' : 'cursor-pointer'} focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-void`}
-                        >
-                          <ArrowUpTrayIcon className="h-5 w-5 mr-2" />
-                          {uploadingPvId === pv.id ? 'Chargement...' : 'Déposer le PV signé'}
-                        </label>
-                      </div>
-                    )}
+                    {/* Upload signed PV button - ALWAYS show it */}
+                    <div className="relative">
+                      <input 
+                        id={`signed-doc-${pv.id}`} 
+                        className="sr-only"
+                        accept=".pdf"
+                        type="file"
+                        onChange={(e) => handleFileChange(e, pv.id)}
+                        disabled={uploadingPvId === pv.id}
+                      />
+                      <label 
+                        htmlFor={`signed-doc-${pv.id}`}
+                        className={`inline-flex items-center px-4 py-2 border rounded-md shadow-sm text-sm font-medium 
+                        border-void text-void bg-white hover:bg-gray-50 ${uploadingPvId === pv.id ? 'opacity-50 cursor-not-allowed' : 'cursor-pointer'} focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-void`}
+                      >
+                        <ArrowUpTrayIcon className="h-5 w-5 mr-2" />
+                        {uploadingPvId === pv.id ? 'Chargement...' : 'Déposer le PV signé'}
+                      </label>
+                    </div>
                     
                     {/* Transfer button */}
                     <button className="inline-flex items-center px-4 py-2 border border-gray-300 rounded-md shadow-sm text-sm font-medium text-gray-700 bg-white hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-void">
@@ -209,6 +445,19 @@ function SignaturePV() {
                     </button>
                   </div>
                 </div>
+                
+                {/* Display a link to view the signed file if it exists */}
+                {pv.signed_file_path && (
+                  <div className="mt-2 text-sm text-gray-500">
+                    <span>Version signée disponible. </span>
+                    <button 
+                      onClick={() => downloadFile(pv.signed_file_path)}
+                      className="ml-1 text-void hover:text-void-dark underline"
+                    >
+                      Voir le document signé
+                    </button>
+                  </div>
+                )}
                 
                 {/* Reminders history section - always show it */}
                 <div className="mt-6 border-t border-gray-200 pt-4">
@@ -255,13 +504,6 @@ function SignaturePV() {
                     )}
                   </div>
                 </div>
-                
-                {/* Show upload error if any */}
-                {uploadError && uploadingPvId === pv.id && (
-                  <div className="mt-2 text-sm text-red-600">
-                    Erreur: {uploadError}
-                  </div>
-                )}
               </div>
             ))}
           </div>

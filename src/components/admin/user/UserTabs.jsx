@@ -16,8 +16,8 @@ function UserTabs({ userId, activeTab }) {
       label: 'Profil'
     },
     {
-      id: 'documents',
-      path: `/admin/users/${userId}/documents`,
+      id: 'pv',
+      path: `/admin/users/${userId}/pv`,
       icon: DocumentTextIcon,
       label: 'Documents et PVs'
     },

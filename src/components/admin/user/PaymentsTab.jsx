@@ -309,6 +309,32 @@ function PaymentsTab({ user, payments, onUpdatePayment, onCreatePayment }) {
     }
   };
 
+  // Add a handleViewFile function for visualizing files
+  const handleViewFile = async (filePath) => {
+    try {
+      if (!filePath) {
+        alert("Aucun fichier n'est associé à cette facture");
+        return;
+      }
+
+      const { data, error } = await supabaseClient
+        .storage
+        .from('payments')
+        .createSignedUrl(filePath, 60);
+
+      if (error) {
+        throw error;
+      }
+
+      if (data) {
+        window.open(data.signedUrl, '_blank');
+      }
+    } catch (error) {
+      console.error("Error viewing file:", error);
+      alert("Erreur lors de l'ouverture du fichier");
+    }
+  };
+
   return (
     <div className="space-y-6">
       <div className="flex items-center justify-between">
@@ -539,17 +565,13 @@ function PaymentsTab({ user, payments, onUpdatePayment, onCreatePayment }) {
                         Document de facture
                       </h3>
                       <div className="flex items-center justify-between">
-                        <a
-                          href={`/invoices/${
-                            selectedPayment.reference || selectedPayment.id
-                          }.pdf`}
-                          target="_blank"
-                          rel="noopener noreferrer"
+                        <button
+                          onClick={() => handleViewFile(selectedPayment.file_path)}
                           className="inline-flex items-center px-3 py-1.5 border border-gray-300 rounded-md text-sm font-medium text-gray-700 bg-white hover:bg-gray-50"
                         >
                           <DocumentTextIcon className="h-5 w-5 mr-2" />
                           Visualiser
-                        </a>
+                        </button>
                         {selectedPayment.file_path &&
                           selectedPayment.file_path !== "" && (
                             <button

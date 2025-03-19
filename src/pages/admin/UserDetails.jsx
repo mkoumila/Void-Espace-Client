@@ -24,7 +24,7 @@ import {
 
 // Import des composants d'onglets
 import ProfileTab from '../../components/admin/user/ProfileTab'
-import DocumentsTab from '../../components/admin/user/DocumentsTab'
+import PVTab from '../../components/admin/user/PVTab'
 import PaymentsTab from '../../components/admin/user/PaymentsTab'
 import ProjectsTab from '../../components/admin/user/ProjectsTab'
 import CreatePVModal from '../../components/admin/user/CreatePVModal'
@@ -293,7 +293,7 @@ function UserDetails() {
         )}
         
         {activeTab === 'documents' && (
-          <DocumentsTab 
+          <PVTab 
             user={user} 
             documents={user.documents} 
             onCreatePV={() => setShowCreatePVModal(true)} 

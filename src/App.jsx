@@ -16,7 +16,7 @@ import ProjectAudit from './pages/ProjectAudit'
 import AdminDashboard from './pages/admin/Dashboard'
 import AdminSettings from './pages/admin/AdminSettings'
 import UserProfile from './pages/admin/user/UserProfile'
-import UserDocuments from './pages/admin/user/UserDocuments'
+import UserPV from './pages/admin/user/UserPV'
 import UserPayments from './pages/admin/user/UserPayments'
 import UserProjects from './pages/admin/user/UserProjects'
 import UserQuotes from './pages/admin/user/UserQuotes'
@@ -67,7 +67,7 @@ function App() {
               <Route element={<ProtectedRoute requiredRole="admin" />}>
                 <Route path="/admin" element={<AdminDashboard />} />
                 <Route path="/admin/users/:userId" element={<UserProfile />} />
-                <Route path="/admin/users/:userId/documents" element={<UserDocuments />} />
+                <Route path="/admin/users/:userId/pv" element={<UserPV />} />
                 <Route path="/admin/users/:userId/payments" element={<UserPayments />} />
                 <Route path="/admin/users/:userId/quotes" element={<UserQuotes />} />
                 <Route path="/admin/users/:userId/projects" element={<UserProjects />} />

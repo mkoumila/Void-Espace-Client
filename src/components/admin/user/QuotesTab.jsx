@@ -639,6 +639,55 @@ function QuotesTab({
     }
   };
 
+  // Add handleViewFile function similar to the one in PaymentsTab
+  const handleViewFile = async (filePath) => {
+    try {
+      if (!filePath) {
+        alert("Aucun fichier n'est associé à ce devis");
+        return;
+      }
+
+      console.log("Attempting to access file:", filePath);
+
+      // Try with both possible bucket names
+      let data, error;
+      
+      // First try the 'quote_files' bucket (most likely correct name)
+      ({ data, error } = await supabaseClient
+        .storage
+        .from('quote_files')
+        .createSignedUrl(filePath, 60));
+        
+      // If error, try 'quotes' bucket as fallback
+      if (error) {
+        console.log("Error with 'quote_files' bucket:", error.message);
+        ({ data, error } = await supabaseClient
+          .storage
+          .from('quotes')
+          .createSignedUrl(filePath, 60));
+      }
+
+      if (error) {
+        console.log("Error with fallback bucket:", error.message);
+        
+        // As a last resort, check if the path is already a URL
+        if (filePath.startsWith('http')) {
+          window.open(filePath, '_blank');
+          return;
+        }
+        
+        throw error;
+      }
+
+      if (data) {
+        window.open(data.signedUrl, '_blank');
+      }
+    } catch (error) {
+      console.error("Error viewing file:", error);
+      alert(`Erreur lors de l'ouverture du fichier: ${error.message}`);
+    }
+  };
+
   // If there's an error, display it
   if (error) {
   return (
@@ -1399,15 +1448,13 @@ function QuotesTab({
                   </h3>
                   {quoteDetail.file_path ? (
                     <div className="flex items-center justify-between">
-                      <a
-                        href={quoteDetail.file_path}
-                        target="_blank"
-                        rel="noopener noreferrer"
+                      <button
+                        onClick={() => handleViewFile(quoteDetail.file_path)}
                         className="inline-flex items-center px-3 py-1.5 border border-gray-300 rounded-md text-sm font-medium text-gray-700 bg-white hover:bg-gray-50"
                       >
                         <DocumentTextIcon className="h-5 w-5 mr-2" />
                         Visualiser
-                      </a>
+                      </button>
                       <button
                         onClick={() =>
                           downloadQuoteFile(

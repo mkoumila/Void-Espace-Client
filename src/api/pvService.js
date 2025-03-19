@@ -35,6 +35,36 @@ export const fetchPVs = async (clientId) => {
   return data;
 };
 
+// Helper function to convert snake_case keys to camelCase
+const transformToCamelCase = (data) => {
+  if (!data) return data;
+  
+  if (Array.isArray(data)) {
+    return data.map(item => transformToCamelCase(item));
+  }
+  
+  if (typeof data === 'object' && data !== null) {
+    const result = {};
+    
+    Object.keys(data).forEach(key => {
+      // Convert snake_case to camelCase
+      const camelKey = key.replace(/_([a-z])/g, (match, p1) => p1.toUpperCase());
+      
+      // If the key was snake_case, keep both versions for backward compatibility
+      if (camelKey !== key) {
+        result[key] = data[key]; // Keep original
+        result[camelKey] = data[key]; // Add camelCase version
+      } else {
+        result[key] = data[key];
+      }
+    });
+    
+    return result;
+  }
+  
+  return data;
+};
+
 // Fetch PVs for a specific user (client view)
 export const fetchUserPVs = async (userId) => {
   const { data: clientData, error: clientError } = await supabaseClient
@@ -62,29 +92,38 @@ export const fetchUserPVs = async (userId) => {
 
   if (error) throw error;
 
+  console.log("Raw PV data from database:", data); // Log raw data
+
+  // Transform data to include camelCase keys
+  const transformedData = transformToCamelCase(data);
+  console.log("Transformed PV data (with camelCase):", transformedData);
+
   // Fetch user information separately, but only for valid user IDs
-  if (data && data.length > 0) {
+  if (transformedData && transformedData.length > 0) {
     // Filter out null or undefined user IDs before making the query
-    const userIds = [...new Set(data.map(pv => pv.created_by).filter(id => id !== null && id !== undefined))];
+    const userIds = [...new Set(transformedData.map(pv => pv.created_by || pv.createdBy).filter(id => id !== null && id !== undefined))];
     
     // Only make the user query if we actually have user IDs
     if (userIds.length > 0) {
       const { data: userData, error: userError } = await supabaseClient
         .from('users')
-        .select('id, email, full_name')
-        .in('id', userIds);
+        .select('id, email, full_name');
 
       if (!userError && userData) {
         // Map user data to PVs
-        return data.map(pv => ({
+        const enrichedData = transformedData.map(pv => ({
           ...pv,
-          creator: pv.created_by ? userData.find(u => u.id === pv.created_by) : null
+          creator: (pv.created_by || pv.createdBy) ? 
+            userData.find(u => u.id === (pv.created_by || pv.createdBy)) : null
         }));
+        
+        console.log("Enriched PV data with user info:", enrichedData); // Log enriched data
+        return enrichedData;
       }
     }
   }
 
-  return data;
+  return transformedData;
 };
 
 // Create a new PV
@@ -179,42 +218,87 @@ export const uploadPVFile = async (file, pvId) => {
 
 // Upload signed PV file
 export const uploadSignedPVFile = async (file, pvId) => {
-  const fileExt = file.name.split('.').pop();
-  const fileName = `${pvId}-signed-${Date.now()}.${fileExt}`;
-  const filePath = `pv/signed/${fileName}`;
-
-  const { error: uploadError } = await supabaseClient.storage
-    .from('pv_files')
-    .upload(filePath, file);
-
-  if (uploadError) throw uploadError;
-
-  const { data: { publicUrl } } = supabaseClient.storage
-    .from('pv_files')
-    .getPublicUrl(filePath);
-
-  await updatePV(pvId, { 
-    signed_file_path: filePath,
-    status: 'Signé',
-    signed_at: new Date().toISOString()
-  });
-
-  return { filePath, publicUrl };
+  try {
+    const fileExt = file.name.split('.').pop().toLowerCase();    
+    if (fileExt !== 'pdf' && file.type !== 'application/pdf') {
+      throw new Error('Veuillez sélectionner un fichier PDF.');
+    }
+    
+    // Generate a unique file name
+    const fileName = `signed_${pvId}_${Date.now()}.pdf`;
+    const filePath = `signed/${fileName}`;
+    
+    // Upload to Supabase storage
+    const { error: uploadError } = await supabaseClient
+      .storage
+      .from('pv_files')
+      .upload(filePath, file, {
+        upsert: true,
+        contentType: 'application/pdf',
+        cacheControl: '3600'
+      });
+      
+    if (uploadError) {
+      console.error("Storage upload error:", uploadError);
+      throw new Error(`Erreur lors du téléversement: ${uploadError.message}`);
+    }
+    
+    // Update the PV record in database
+    const { data: updateData, error: updateError } = await supabaseClient
+      .from('pv')
+      .update({
+        signed_file_path: filePath,
+        status: 'Signé',
+        signed_at: new Date().toISOString()
+      })
+      .eq('id', pvId)
+      .select()
+      .single();
+      
+    if (updateError) {
+      console.error("Database update error:", updateError);
+      throw new Error(`Erreur lors de la mise à jour de la base de données: ${updateError.message}`);
+    }
+    
+    return {
+      success: true,
+      filePath,
+      data: updateData
+    };
+    
+  } catch (error) {
+    console.error("Error in uploadSignedPVFile:", error);
+    throw error;
+  }
 };
 
-// Download PV file
+// Download PV file from storage
 export const downloadPVFile = async (filePath) => {
   try {
+    if (!filePath) {
+      throw new Error("Aucun fichier spécifié");
+    }
+
+    console.log("Attempting to download file:", filePath);
+
+    // Try to download from Supabase storage
     const { data, error } = await supabaseClient
       .storage
       .from('pv_files')
       .download(filePath);
-      
-    if (error) throw error;
-    
+
+    if (error) {
+      console.error("Storage download error:", error);
+      throw error;
+    }
+
+    if (!data) {
+      throw new Error("Aucune donnée reçue du serveur");
+    }
+
     return { data, error: null };
   } catch (error) {
-    console.error('Error downloading PV file:', error);
+    console.error("Error in downloadPVFile:", error);
     return { data: null, error };
   }
 };

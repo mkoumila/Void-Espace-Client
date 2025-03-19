@@ -3,12 +3,12 @@ import { useParams, useLocation } from 'react-router-dom'
 import supabaseClient from '../../../api/supabaseClient'
 import * as pvService from '../../../api/pvService'
 
-import DocumentsTab from '../../../components/admin/user/DocumentsTab'
+import PVTab from '../../../components/admin/user/PVTab'
 import CreatePVModal from '../../../components/admin/user/CreatePVModal'
 import UserTabs from '../../../components/admin/user/UserTabs'
 import UserHeader from '../../../components/admin/user/UserHeader'
 
-function UserDocuments() {
+function UserPV() {
   const { userId } = useParams()
   const location = useLocation()
   const dataFetchedRef = useRef(false)
@@ -16,7 +16,7 @@ function UserDocuments() {
   // Déterminer l'onglet actif en fonction de l'URL
   const getActiveTab = () => {
     const path = location.pathname
-    if (path.includes('/documents')) return 'documents'
+    if (path.includes('/pv')) return 'pv'
     if (path.includes('/payments')) return 'payments'
     if (path.includes('/projects')) return 'projects'
     if (path.includes('/quotes')) return 'quotes'
@@ -35,7 +35,7 @@ function UserDocuments() {
     role: ''
   })
   
-  const [documents, setDocuments] = useState([])
+  const [pvs, setPVs] = useState([])
   const [projects, setProjects] = useState([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState(null)
@@ -96,19 +96,26 @@ function UserDocuments() {
         if (pvError) throw pvError;
 
         // Format PVs for display
-        const formattedPVs = pvData.map(pv => ({
-          id: pv.id,
-          title: pv.title,
-          type: 'pv',
-          status: pv.status,
-          date: pv.created_at,
-          project: pv.projects?.name || 'N/A',
-          project_id: pv.project_id,
-          file_path: pv.file_path,
-          description: pv.description
-        }));
+        const formattedPVs = pvData.map(pv => {
+          console.log("Raw PV data:", pv); // Debug log
+          return {
+            id: pv.id,
+            title: pv.title,
+            type: 'pv',
+            status: pv.status,
+            date: pv.created_at,
+            project: pv.projects?.name || 'N/A',
+            project_id: pv.project_id,
+            file_path: pv.file_path,
+            signed_file_path: pv.signed_file_path,
+            description: pv.description,
+            signed_at: pv.signed_at,
+            signedAt: pv.signed_at // Include both versions for compatibility
+          };
+        });
 
-        setDocuments(formattedPVs);
+        console.log("Formatted PVs:", formattedPVs); // Debug log
+        setPVs(formattedPVs);
       } catch (err) {
         console.error('Error loading data:', err);
         setError(err.message);
@@ -209,7 +216,7 @@ function UserDocuments() {
       };
       
       // Ajouter le nouveau PV à la liste
-      setDocuments([formattedPV, ...documents]);
+      setPVs([formattedPV, ...pvs]);
       
       // Réinitialiser le formulaire
       setNewPV({
@@ -228,36 +235,52 @@ function UserDocuments() {
   }
 
   // Fonction pour mettre à jour un document
-  const handleUpdateDocument = async (updatedDocument) => {
+  const handleUpdatePV = async (updatedPV) => {
     try {
       // Pour l'instant, seuls les PV sont gérés
-      if (updatedDocument.type === 'pv') {
-        const { error } = await supabaseClient
-          .from('pv')
-          .update({
-            title: updatedDocument.title,
-            description: updatedDocument.description,
-            status: updatedDocument.status,
-            // Autres champs à mettre à jour si nécessaire
-          })
-          .eq('id', updatedDocument.id);
-          
-        if (error) {
-          throw new Error(`Erreur lors de la mise à jour du PV: ${error.message}`);
-        }
-        
-        // Mettre à jour la liste des documents
-        const updatedDocuments = documents.map(doc => 
-          doc.id === updatedDocument.id ? updatedDocument : doc
-        );
-        
-        setDocuments(updatedDocuments);
-      } else {
-        throw new Error('Type de document non pris en charge pour la mise à jour');
+      const updateData = {
+        title: updatedPV.title,
+        description: updatedPV.description,
+        status: updatedPV.status
+      };
+      
+      // Add signed file data if present
+      if (updatedPV.signed_file_path) {
+        updateData.signed_file_path = updatedPV.signed_file_path;
       }
-    } catch (err) {
-      console.error('Erreur lors de la mise à jour du document:', err);
-      alert(`Une erreur est survenue: ${err.message}`);
+      if (updatedPV.signed_at) {
+        updateData.signed_at = updatedPV.signed_at;
+      }
+      
+      const { error } = await supabaseClient
+        .from('pv')
+        .update(updateData)
+        .eq('id', updatedPV.id);
+
+      if (error) {
+        console.error("Error updating PV:", error);
+        throw new Error("Erreur lors de la mise à jour du document");
+      }
+
+      // Update the local state
+      setPVs(currentPVs => 
+        currentPVs.map(pv => 
+          pv.id === updatedPV.id 
+            ? {
+                ...pv,
+                ...updatedPV,
+                // Ensure both snake_case and camelCase versions are updated
+                signed_file_path: updatedPV.signed_file_path,
+                signedFilePath: updatedPV.signed_file_path,
+                signed_at: updatedPV.signed_at,
+                signedAt: updatedPV.signed_at
+              }
+            : pv
+        )
+      );
+    } catch (error) {
+      console.error('Error updating document:', error);
+      throw error;
     }
   };
 
@@ -286,18 +309,18 @@ function UserDocuments() {
       {/* Onglets de navigation */}
       <UserTabs userId={userId} activeTab={activeTab} />
 
-      {/* Contenu des documents */}
+      {/* Contenu des PVs */}
       <div className="mt-6">
         {loading ? (
           <div className="flex justify-center items-center h-64">
             <div className="animate-spin rounded-full h-12 w-12 border-t-2 border-b-2 border-void"></div>
           </div>
         ) : (
-          <DocumentsTab 
+          <PVTab 
             user={user} 
-            documents={documents} 
+            pvs={pvs} 
             onCreatePV={() => setShowCreatePVModal(true)} 
-            onUpdateDocument={handleUpdateDocument}
+            onUpdatePV={handleUpdatePV}
           />
         )}
       </div>
@@ -317,4 +340,4 @@ function UserDocuments() {
   )
 }
 
-export default UserDocuments 
+export default UserPV 
