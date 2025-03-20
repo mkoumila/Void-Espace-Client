@@ -1,33 +1,35 @@
-import supabaseClient from './supabaseClient';
+import supabaseClient from "./supabaseClient";
 
 // Fetch PVs for a specific client
 export const fetchPVs = async (clientId) => {
   const { data, error } = await supabaseClient
-    .from('pv')
-    .select(`
+    .from("pv")
+    .select(
+      `
       *,
       projects!project_id (
         name
       )
-    `)
-    .eq('client_id', clientId)
-    .order('created_at', { ascending: false });
+    `
+    )
+    .eq("client_id", clientId)
+    .order("created_at", { ascending: false });
 
   if (error) throw error;
 
   // Fetch user information separately
   if (data && data.length > 0) {
-    const userIds = [...new Set(data.map(pv => pv.created_by))];
+    const userIds = [...new Set(data.map((pv) => pv.created_by))];
     const { data: userData, error: userError } = await supabaseClient
-      .from('users')
-      .select('id, email, full_name')
-      .in('id', userIds);
+      .from("users")
+      .select("id, email, full_name")
+      .in("id", userIds);
 
     if (!userError && userData) {
       // Map user data to PVs
-      return data.map(pv => ({
+      return data.map((pv) => ({
         ...pv,
-        creator: userData.find(u => u.id === pv.created_by)
+        creator: userData.find((u) => u.id === pv.created_by),
       }));
     }
   }
@@ -38,18 +40,20 @@ export const fetchPVs = async (clientId) => {
 // Helper function to convert snake_case keys to camelCase
 const transformToCamelCase = (data) => {
   if (!data) return data;
-  
+
   if (Array.isArray(data)) {
-    return data.map(item => transformToCamelCase(item));
+    return data.map((item) => transformToCamelCase(item));
   }
-  
-  if (typeof data === 'object' && data !== null) {
+
+  if (typeof data === "object" && data !== null) {
     const result = {};
-    
-    Object.keys(data).forEach(key => {
+
+    Object.keys(data).forEach((key) => {
       // Convert snake_case to camelCase
-      const camelKey = key.replace(/_([a-z])/g, (match, p1) => p1.toUpperCase());
-      
+      const camelKey = key.replace(/_([a-z])/g, (match, p1) =>
+        p1.toUpperCase()
+      );
+
       // If the key was snake_case, keep both versions for backward compatibility
       if (camelKey !== key) {
         result[key] = data[key]; // Keep original
@@ -58,62 +62,113 @@ const transformToCamelCase = (data) => {
         result[key] = data[key];
       }
     });
-    
+
     return result;
   }
-  
+
   return data;
 };
 
 // Fetch PVs for a specific user (client view)
 export const fetchUserPVs = async (userId) => {
   const { data: clientData, error: clientError } = await supabaseClient
-    .from('clients')
-    .select('id')
-    .eq('user_id', userId)
+    .from("clients")
+    .select(
+      `
+      *,
+      user:user_id (
+        id,
+        email,
+        first_name,
+        last_name,
+        phone,
+        company,
+        role
+      )
+    `
+    )
+    .eq("user_id", userId)
     .single();
 
   if (clientError) throw clientError;
 
   if (!clientData) {
-    throw new Error('No client record found for user');
+    throw new Error("No client record found for user");
   }
 
   const { data, error } = await supabaseClient
-    .from('pv')
-    .select(`
+    .from("pv")
+    .select(
+      `
       *,
       projects:project_id (
         name
+      ),
+      client:client_id (
+        *,
+        user:user_id (
+          id,
+          email,
+          first_name,
+          last_name,
+          phone,
+          company,
+          role
+        )
       )
-    `)
-    .eq('client_id', clientData.id)
-    .order('created_at', { ascending: false });
+    `
+    )
+    .eq("client_id", clientData.id)
+    .order("created_at", { ascending: false });
 
   if (error) throw error;
 
-  // Transform data to include camelCase keys
-  const transformedData = transformToCamelCase(data);
+  // Transform data to include camelCase keys and ensure client data is present
+  const transformedData = data.map((pv) => {
+    const transformedPV = transformToCamelCase(pv);
+    const clientInfo = {
+      ...transformedPV.client,
+      phone: transformedPV.client?.user?.phone || clientData.user?.phone,
+      email: transformedPV.client?.user?.email || clientData.user?.email,
+      firstName:
+        transformedPV.client?.user?.first_name || clientData.user?.first_name,
+      lastName:
+        transformedPV.client?.user?.last_name || clientData.user?.last_name,
+    };
+
+    return {
+      ...transformedPV,
+      client: transformToCamelCase(clientInfo),
+    };
+  });
 
   // Fetch user information separately, but only for valid user IDs
   if (transformedData && transformedData.length > 0) {
     // Filter out null or undefined user IDs before making the query
-    const userIds = [...new Set(transformedData.map(pv => pv.created_by || pv.createdBy).filter(id => id !== null && id !== undefined))];
-    
+    const userIds = [
+      ...new Set(
+        transformedData
+          .map((pv) => pv.created_by || pv.createdBy)
+          .filter((id) => id !== null && id !== undefined)
+      ),
+    ];
+
     // Only make the user query if we actually have user IDs
     if (userIds.length > 0) {
       const { data: userData, error: userError } = await supabaseClient
-        .from('users')
-        .select('id, email, full_name');
+        .from("users")
+        .select("id, email, first_name, last_name, role");
 
       if (!userError && userData) {
         // Map user data to PVs
-        const enrichedData = transformedData.map(pv => ({
+        const enrichedData = transformedData.map((pv) => ({
           ...pv,
-          creator: (pv.created_by || pv.createdBy) ? 
-            userData.find(u => u.id === (pv.created_by || pv.createdBy)) : null
+          creator:
+            pv.created_by || pv.createdBy
+              ? userData.find((u) => u.id === (pv.created_by || pv.createdBy))
+              : null,
         }));
-        
+
         return enrichedData;
       }
     }
@@ -127,47 +182,48 @@ export const createPV = async (pvData) => {
   try {
     // Upload de fichier si présent
     let filePath = null;
-    
+
     if (pvData.file) {
-      const fileExt = pvData.file.name.split('.').pop();
-      const fileName = `${Date.now()}_${Math.random().toString(36).substr(2, 9)}.${fileExt}`;
+      const fileExt = pvData.file.name.split(".").pop();
+      const fileName = `${Date.now()}_${Math.random()
+        .toString(36)
+        .substr(2, 9)}.${fileExt}`;
       filePath = fileName;
-      
+
       // Upload du fichier
-      const { error: uploadError } = await supabaseClient
-        .storage
-        .from('pv_files')
+      const { error: uploadError } = await supabaseClient.storage
+        .from("pv_files")
         .upload(filePath, pvData.file);
-        
+
       if (uploadError) throw uploadError;
     }
-    
+
     // Calculer la date d'échéance (30 jours à partir d'aujourd'hui)
     const dueDate = new Date();
     dueDate.setDate(dueDate.getDate() + 30);
-    
+
     // Création de l'entrée PV
     const { data, error } = await supabaseClient
-      .from('pv')
+      .from("pv")
       .insert([
         {
           title: pvData.title,
           description: pvData.description || null,
-          status: 'En attente de signature',
+          status: "En attente de signature",
           file_path: filePath,
           client_id: pvData.client_id,
           project_id: pvData.project_id,
-          due_date: dueDate.toISOString()
-        }
+          due_date: dueDate.toISOString(),
+        },
       ])
       .select()
       .single();
-      
+
     if (error) throw error;
-    
+
     return { data, error: null };
   } catch (error) {
-    console.error('Error creating PV:', error);
+    console.error("Error creating PV:", error);
     return { data: null, error };
   }
 };
@@ -176,36 +232,36 @@ export const createPV = async (pvData) => {
 export const updatePV = async (pvId, updateData) => {
   try {
     const { data, error } = await supabaseClient
-      .from('pv')
+      .from("pv")
       .update(updateData)
-      .eq('id', pvId)
+      .eq("id", pvId)
       .select()
       .single();
-      
+
     if (error) throw error;
-    
+
     return { data, error: null };
   } catch (error) {
-    console.error('Error updating PV:', error);
+    console.error("Error updating PV:", error);
     return { data: null, error };
   }
 };
 
 // Upload PV file
 export const uploadPVFile = async (file, pvId) => {
-  const fileExt = file.name.split('.').pop();
+  const fileExt = file.name.split(".").pop();
   const fileName = `${pvId}-${Date.now()}.${fileExt}`;
   const filePath = `pv/${fileName}`;
 
   const { error: uploadError } = await supabaseClient.storage
-    .from('pv_files')
+    .from("pv_files")
     .upload(filePath, file);
 
   if (uploadError) throw uploadError;
 
-  const { data: { publicUrl } } = supabaseClient.storage
-    .from('pv_files')
-    .getPublicUrl(filePath);
+  const {
+    data: { publicUrl },
+  } = supabaseClient.storage.from("pv_files").getPublicUrl(filePath);
 
   await updatePV(pvId, { file_path: filePath });
 
@@ -215,53 +271,53 @@ export const uploadPVFile = async (file, pvId) => {
 // Upload signed PV file
 export const uploadSignedPVFile = async (file, pvId) => {
   try {
-    const fileExt = file.name.split('.').pop().toLowerCase();    
-    if (fileExt !== 'pdf' && file.type !== 'application/pdf') {
-      throw new Error('Veuillez sélectionner un fichier PDF.');
+    const fileExt = file.name.split(".").pop().toLowerCase();
+    if (fileExt !== "pdf" && file.type !== "application/pdf") {
+      throw new Error("Veuillez sélectionner un fichier PDF.");
     }
-    
+
     // Generate a unique file name
     const fileName = `signed_${pvId}_${Date.now()}.pdf`;
     const filePath = `signed/${fileName}`;
-    
+
     // Upload to Supabase storage
-    const { error: uploadError } = await supabaseClient
-      .storage
-      .from('pv_files')
+    const { error: uploadError } = await supabaseClient.storage
+      .from("pv_files")
       .upload(filePath, file, {
         upsert: true,
-        contentType: 'application/pdf',
-        cacheControl: '3600'
+        contentType: "application/pdf",
+        cacheControl: "3600",
       });
-      
+
     if (uploadError) {
       console.error("Storage upload error:", uploadError);
       throw new Error(`Erreur lors du téléversement: ${uploadError.message}`);
     }
-    
+
     // Update the PV record in database
     const { data: updateData, error: updateError } = await supabaseClient
-      .from('pv')
+      .from("pv")
       .update({
         signed_file_path: filePath,
-        status: 'Signé',
-        signed_at: new Date().toISOString()
+        status: "Signé",
+        signed_at: new Date().toISOString(),
       })
-      .eq('id', pvId)
+      .eq("id", pvId)
       .select()
       .single();
-      
+
     if (updateError) {
       console.error("Database update error:", updateError);
-      throw new Error(`Erreur lors de la mise à jour de la base de données: ${updateError.message}`);
+      throw new Error(
+        `Erreur lors de la mise à jour de la base de données: ${updateError.message}`
+      );
     }
-    
+
     return {
       success: true,
       filePath,
-      data: updateData
+      data: updateData,
     };
-    
   } catch (error) {
     console.error("Error in uploadSignedPVFile:", error);
     throw error;
@@ -276,9 +332,8 @@ export const downloadPVFile = async (filePath) => {
     }
 
     // Try to download from Supabase storage
-    const { data, error } = await supabaseClient
-      .storage
-      .from('pv_files')
+    const { data, error } = await supabaseClient.storage
+      .from("pv_files")
       .download(filePath);
 
     if (error) {
@@ -302,37 +357,33 @@ export const deletePV = async (pvId) => {
   try {
     // D'abord, récupérer le chemin du fichier
     const { data: pvData, error: fetchError } = await supabaseClient
-      .from('pv')
-      .select('file_path')
-      .eq('id', pvId)
+      .from("pv")
+      .select("file_path")
+      .eq("id", pvId)
       .single();
-      
+
     if (fetchError) throw fetchError;
-    
+
     // Supprimer le fichier si présent
     if (pvData.file_path) {
-      const { error: storageError } = await supabaseClient
-        .storage
-        .from('pv_files')
+      const { error: storageError } = await supabaseClient.storage
+        .from("pv_files")
         .remove([pvData.file_path]);
-        
+
       if (storageError) {
-        console.error('Error deleting PV file:', storageError);
+        console.error("Error deleting PV file:", storageError);
         // Continue anyway to delete the record
       }
     }
-    
+
     // Supprimer l'entrée PV
-    const { error } = await supabaseClient
-      .from('pv')
-      .delete()
-      .eq('id', pvId);
-      
+    const { error } = await supabaseClient.from("pv").delete().eq("id", pvId);
+
     if (error) throw error;
-    
+
     return { success: true, error: null };
   } catch (error) {
-    console.error('Error deleting PV:', error);
+    console.error("Error deleting PV:", error);
     return { success: false, error };
   }
 };
@@ -341,23 +392,81 @@ export const deletePV = async (pvId) => {
 export const markPVAsSigned = async (pvId) => {
   try {
     const signedAt = new Date().toISOString();
-    
+
     const { data, error } = await supabaseClient
-      .from('pv')
+      .from("pv")
       .update({
-        status: 'Signé',
-        signed_at: signedAt
+        status: "Signé",
+        signed_at: signedAt,
       })
-      .eq('id', pvId)
+      .eq("id", pvId)
       .select()
       .single();
-      
+
     if (error) throw error;
-    
+
     return { data, error: null };
   } catch (error) {
-    console.error('Error marking PV as signed:', error);
+    console.error("Error marking PV as signed:", error);
     return { data: null, error };
+  }
+};
+
+// Fetch followups for a PV
+export const fetchPVFollowups = async (pvId) => {
+  try {
+    // First fetch the followups
+    const { data: followups, error: followupsError } = await supabaseClient
+      .from("pv_followups")
+      .select("*")
+      .eq("pv_id", pvId)
+      .order("created_at", { ascending: false });
+
+    if (followupsError) throw followupsError;
+
+    // If we have followups, fetch the user information
+    if (followups && followups.length > 0) {
+      const userIds = [...new Set(followups.map((f) => f.created_by))];
+      const { data: userData, error: userError } = await supabaseClient
+        .from("users")
+        .select("id, first_name, last_name, email, role")
+        .in("id", userIds);
+
+      if (userError) throw userError;
+
+      // Map user data to followups
+      return followups.map((followup) => ({
+        ...followup,
+        user: userData.find((u) => u.id === followup.created_by),
+      }));
+    }
+
+    return followups || [];
+  } catch (error) {
+    console.error("Error fetching PV followups:", error);
+    throw error;
+  }
+};
+
+// Create a new followup for a PV
+export const createPVFollowup = async (pvId, followupData) => {
+  try {
+    const { data, error } = await supabaseClient
+      .from("pv_followups")
+      .insert({
+        pv_id: pvId,
+        type: followupData.email ? "email" : "phone",
+        comment: followupData.comment,
+        created_by: followupData.created_by,
+      })
+      .select()
+      .single();
+
+    if (error) throw error;
+    return data;
+  } catch (error) {
+    console.error("Error creating PV followup:", error);
+    throw error;
   }
 };
 
@@ -371,5 +480,7 @@ export const pvService = {
   uploadSignedPVFile,
   downloadPVFile,
   deletePV,
-  markPVAsSigned
-}; 
+  markPVAsSigned,
+  fetchPVFollowups,
+  createPVFollowup,
+};

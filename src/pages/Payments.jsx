@@ -1,35 +1,35 @@
-import { useState, useEffect } from 'react'
-import { 
-  ArrowPathRoundedSquareIcon, 
-  EnvelopeIcon, 
+import { useState, useEffect } from "react";
+import {
+  ArrowPathRoundedSquareIcon,
+  EnvelopeIcon,
   PhoneIcon,
   ExclamationTriangleIcon,
   ChevronDownIcon,
   ClockIcon,
   UserIcon,
-  DocumentTextIcon
-} from '@heroicons/react/24/outline'
-import { paymentService } from '../api/paymentService'
-import supabaseClient from '../api/supabaseClient'
+  DocumentTextIcon,
+} from "@heroicons/react/24/outline";
+import { paymentService } from "../api/paymentService";
+import supabaseClient from "../api/supabaseClient";
 
 function Payments() {
-  const [payments, setPayments] = useState([])
-  const [loading, setLoading] = useState(true)
-  const [error, setError] = useState(null)
-  const [showContactForm, setShowContactForm] = useState(false)
-  const [selectedPayment, setSelectedPayment] = useState(null)
+  const [payments, setPayments] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState(null);
+  const [showContactForm, setShowContactForm] = useState(false);
+  const [selectedPayment, setSelectedPayment] = useState(null);
   const [contactInfo, setContactInfo] = useState({
-    email: '',
-    phone: '',
-    comment: ''
-  })
-  const [expandedPayments, setExpandedPayments] = useState(new Set())
-  const [followups, setFollowups] = useState({})
-  const [formError, setFormError] = useState('')
+    email: "",
+    phone: "",
+    comment: "",
+  });
+  const [expandedPayments, setExpandedPayments] = useState(new Set());
+  const [followups, setFollowups] = useState({});
+  const [formError, setFormError] = useState("");
 
   useEffect(() => {
-    fetchPayments()
-  }, [])
+    fetchPayments();
+  }, []);
 
   // Fetch followups when a payment is expanded
   useEffect(() => {
@@ -37,152 +37,211 @@ function Payments() {
       for (const paymentId of expandedPayments) {
         if (!followups[paymentId]) {
           try {
-            const data = await paymentService.fetchPaymentFollowups(paymentId)
-            setFollowups(prev => ({ ...prev, [paymentId]: data }))
+            const data = await paymentService.fetchPaymentFollowups(paymentId);
+            setFollowups((prev) => ({ ...prev, [paymentId]: data }));
           } catch (err) {
-            console.error('Error fetching followups:', err)
+            console.error("Error fetching followups:", err);
           }
         }
       }
-    }
+    };
 
-    fetchFollowups()
-  }, [expandedPayments])
+    fetchFollowups();
+  }, [expandedPayments]);
 
   const fetchPayments = async () => {
     try {
-      setLoading(true)
+      setLoading(true);
       // Get the current user's client ID
-      const { data: { user } } = await supabaseClient.auth.getUser()
+      const {
+        data: { user },
+      } = await supabaseClient.auth.getUser();
       if (!user) {
-        throw new Error('No authenticated user')
+        throw new Error("No authenticated user");
       }
 
       // Get the client record for the current user
       const { data: clientData, error: clientError } = await supabaseClient
-        .from('clients')
-        .select('id')
-        .eq('user_id', user.id)
-        .single()
+        .from("clients")
+        .select("id")
+        .eq("user_id", user.id)
+        .single();
 
       if (clientError) {
-        throw clientError
+        throw clientError;
       }
 
       if (!clientData) {
-        throw new Error('No client record found for user')
+        throw new Error("No client record found for user");
       }
 
       // Fetch payments using the actual client ID
-      const data = await paymentService.fetchPayments(clientData.id)
-      setPayments(data)
+      const data = await paymentService.fetchPayments(clientData.id);
+      setPayments(data);
     } catch (err) {
-      setError('Failed to fetch payments')
-      console.error('Error fetching payments:', err)
+      setError("Failed to fetch payments");
+      console.error("Error fetching payments:", err);
     } finally {
-      setLoading(false)
+      setLoading(false);
     }
-  }
+  };
 
   const handleTransfer = (payment) => {
-    setSelectedPayment(payment)
-    setShowContactForm(true)
-  }
+    setSelectedPayment(payment);
+    setShowContactForm(true);
+  };
 
   /* const handleSubmitContact = async (e) => {
-    e.preventDefault()
-    setFormError('')
+    e.preventDefault();
+    setFormError("");
     try {
       if (!contactInfo.email && !contactInfo.phone) {
-        setFormError('Veuillez remplir au moins l\'email ou le numéro de téléphone')
-        return
+        setFormError(
+          "Veuillez remplir au moins l'email ou le numéro de téléphone"
+        );
+        return;
       }
 
-      await paymentService.createPaymentFollowup(selectedPayment.id, contactInfo)
-      
-      // Update the followups state
-      const newFollowup = {
-        id: Date.now(), // Temporary ID until we get the real one
-        email: contactInfo.email,
-        phone: contactInfo.phone,
-        comment: contactInfo.comment,
-        created_at: new Date().toISOString(),
-        created_by: (await supabaseClient.auth.getUser()).data.user.id
+      // Get current user
+      const {
+        data: { user },
+      } = await supabaseClient.auth.getUser();
+      if (!user) {
+        setFormError("Utilisateur non authentifié");
+        return;
       }
-      
-      setFollowups(prev => ({
+
+      console.log(
+        "Creating payment followup for",
+        selectedPayment.id,
+        "by",
+        user.id
+      );
+
+      const followupData = {
+        ...contactInfo,
+        created_by: user.id,
+      };
+
+      // Create the followup
+      const newFollowup = await paymentService.createPaymentFollowup(
+        selectedPayment.id,
+        followupData
+      );
+      console.log("New followup created:", newFollowup);
+
+      // Update the followups state with the new followup
+      setFollowups((prev) => ({
         ...prev,
-        [selectedPayment.id]: [newFollowup, ...(prev[selectedPayment.id] || [])]
-      }))
+        [selectedPayment.id]: [
+          newFollowup,
+          ...(prev[selectedPayment.id] || []),
+        ],
+      }));
 
-      setShowContactForm(false)
-      setContactInfo({ email: '', phone: '', comment: '' })
+      // Close the form and reset fields
+      setShowContactForm(false);
+      setContactInfo({ email: "", phone: "", comment: "" });
+
+      // Refetch followups to ensure we have the latest data
+      const updatedFollowups = await paymentService.fetchPaymentFollowups(
+        selectedPayment.id
+      );
+      console.log("Updated followups:", updatedFollowups);
+      setFollowups((prev) => ({
+        ...prev,
+        [selectedPayment.id]: updatedFollowups,
+      }));
     } catch (err) {
-      console.error('Error submitting contact form:', err)
-      setFormError('Erreur lors de la soumission du formulaire')
+      console.error("Error submitting contact form:", err);
+      setFormError("Erreur lors de la soumission du formulaire");
     }
-  } */
+  }; */
 
   const togglePaymentExpand = (paymentId) => {
-    const newExpanded = new Set(expandedPayments)
+    const newExpanded = new Set(expandedPayments);
     if (newExpanded.has(paymentId)) {
-      newExpanded.delete(paymentId)
+      newExpanded.delete(paymentId);
     } else {
-      newExpanded.add(paymentId)
+      newExpanded.add(paymentId);
     }
-    setExpandedPayments(newExpanded)
-  }
+    setExpandedPayments(newExpanded);
+  };
 
   if (loading) {
-    return <div>Loading...</div>
+    return <div>Loading...</div>;
   }
 
   if (error) {
-    return <div>Error: {error}</div>
+    return <div>Error: {error}</div>;
   }
 
   return (
     <>
-      <h1 className="text-2xl font-bold text-gray-900 mb-8">Suivi des paiements</h1>
-      <div className="shadow rounded-lg bg-white overflow-hidden">
+      <h1 className="text-2xl font-bold text-gray-900 mb-8">
+        Suivi des paiements
+      </h1>
+      <div>
         {payments.length === 0 ? (
-          
-            <div className="bg-white p-10 flex flex-col items-center">
-              <DocumentTextIcon className="h-12 w-12 text-gray-400 mb-4" />
-              <p className="mt-2 text-gray-500">Aucun paiement disponible</p>
-            </div>
-          
+          <div className="shadow rounded-lg bg-white overflow-hidden p-10 flex flex-col items-center">
+            <DocumentTextIcon className="h-12 w-12 text-gray-400 mb-4" />
+            <p className="mt-2 text-gray-500">Aucun paiement disponible</p>
+          </div>
         ) : (
           <div className="flex flex-col gap-4">
             {payments.map((payment) => (
-              <div key={payment.id} className='bg-white'>
+              <div key={payment.id} className="bg-white">
                 {/* Main payment information */}
                 <div className="p-6">
                   <div className="flex items-start justify-between">
                     <div>
                       <div className="flex items-center space-x-3">
                         <h3 className="text-lg font-medium text-gray-900">
-                          Paiement {payment.reference || payment.id}
+                          {payment.reference || payment.id}
                         </h3>
-                        <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium ${
-                          payment.status === 'Payé' ? 'bg-green-100 text-green-800' :
-                          payment.status === 'En attente' && new Date(payment.due_date) < new Date() ? 'bg-red-100 text-red-800' :
-                          payment.status === 'En attente' ? 'bg-yellow-100 text-yellow-800' :
-                          payment.status === 'Annulé' ? 'bg-gray-100 text-gray-800' :
-                          'bg-gray-100 text-gray-800'
-                        }`}>
-                          {payment.status === 'Payé' ? 'Payé' :
-                           payment.status === 'En attente' && new Date(payment.due_date) < new Date() ? 'En retard' :
-                           payment.status === 'En attente' ? 'En attente' :
-                           payment.status === 'Annulé' ? 'Annulé' :
-                           payment.status}
+                        <span
+                          className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium ${
+                            payment.status === "Payé"
+                              ? "bg-green-100 text-green-800"
+                              : payment.status === "En attente" &&
+                                new Date(payment.due_date) < new Date()
+                              ? "bg-red-100 text-red-800"
+                              : payment.status === "En attente"
+                              ? "bg-yellow-100 text-yellow-800"
+                              : payment.status === "Annulé"
+                              ? "bg-gray-100 text-gray-800"
+                              : "bg-gray-100 text-gray-800"
+                          }`}
+                        >
+                          {payment.status === "Payé"
+                            ? "Payé"
+                            : payment.status === "En attente" &&
+                              new Date(payment.due_date) < new Date()
+                            ? "En retard"
+                            : payment.status === "En attente"
+                            ? "En attente"
+                            : payment.status === "Annulé"
+                            ? "Annulé"
+                            : payment.status}
                         </span>
                       </div>
                       <div className="mt-1 text-sm text-gray-500">
                         <p>Montant : {payment.amount}€</p>
-                        <p>Date d'émission : {new Date(payment.payment_date).toLocaleDateString('fr-FR')}</p>
-                        <p>Date d'échéance : {new Date(payment.due_date).toLocaleDateString('fr-FR')}</p>
-                        {payment.description && <p>Description : {payment.description}</p>}
+                        <p>
+                          Date d'émission :{" "}
+                          {new Date(payment.payment_date).toLocaleDateString(
+                            "fr-FR"
+                          )}
+                        </p>
+                        <p>
+                          Date d'échéance :{" "}
+                          {new Date(payment.due_date).toLocaleDateString(
+                            "fr-FR"
+                          )}
+                        </p>
+                        {payment.description && (
+                          <p>Description : {payment.description}</p>
+                        )}
                       </div>
                     </div>
 
@@ -198,10 +257,10 @@ function Payments() {
                         onClick={() => togglePaymentExpand(payment.id)}
                         className="text-gray-400 hover:text-gray-500"
                       >
-                        <ChevronDownIcon 
+                        <ChevronDownIcon
                           className={`h-5 w-5 transform transition-transform ${
-                            expandedPayments.has(payment.id) ? 'rotate-180' : ''
-                          }`} 
+                            expandedPayments.has(payment.id) ? "rotate-180" : ""
+                          }`}
                         />
                       </button>
                     </div>
@@ -216,9 +275,12 @@ function Payments() {
                       <div className="space-y-4">
                         {followups[payment.id]?.length > 0 ? (
                           followups[payment.id].map((followup) => (
-                            <div key={followup.id} className="flex items-start space-x-3 bg-gray-50 p-3 rounded-lg">
+                            <div
+                              key={followup.id}
+                              className="flex items-start space-x-3 bg-gray-50 p-3 rounded-lg"
+                            >
                               <div className="flex-shrink-0">
-                                {followup.email ? (
+                                {followup.type === "email" ? (
                                   <EnvelopeIcon className="h-5 w-5 text-green-500" />
                                 ) : (
                                   <PhoneIcon className="h-5 w-5 text-green-500" />
@@ -227,40 +289,36 @@ function Payments() {
                               <div className="flex-1 min-w-0">
                                 <div className="flex items-center justify-between">
                                   <div className="text-sm font-medium text-gray-900">
-                                    {followup.email || followup.phone}
+                                    Relance{" "}
+                                    {followup.type === "email"
+                                      ? "par email"
+                                      : "par téléphone"}
                                   </div>
                                   <div className="text-xs text-gray-500">
-                                    {new Date(followup.created_at).toLocaleDateString('fr-FR', {
-                                      day: '2-digit',
-                                      month: 'long',
-                                      hour: '2-digit',
-                                      minute: '2-digit'
+                                    {new Date(
+                                      followup.created_at
+                                    ).toLocaleDateString("fr-FR", {
+                                      day: "2-digit",
+                                      month: "long",
+                                      year: "numeric",
+                                      hour: "2-digit",
+                                      minute: "2-digit",
                                     })}
                                   </div>
                                 </div>
-                                <div className="mt-1">
-                                  {followup.email && (
-                                    <div className="flex items-center text-sm text-gray-500">
-                                      <EnvelopeIcon className="h-4 w-4 mr-1" />
-                                      <span>{followup.email}</span>
-                                    </div>
-                                  )}
-                                  {followup.phone && (
-                                    <div className="flex items-center text-sm text-gray-500">
-                                      <PhoneIcon className="h-4 w-4 mr-1" />
-                                      <span>{followup.phone}</span>
-                                    </div>
-                                  )}
-                                </div>
                                 {followup.comment && (
-                                  <p className="mt-2 text-sm text-gray-600">{followup.comment}</p>
+                                  <p className="mt-2 text-sm text-gray-600">
+                                    {followup.comment}
+                                  </p>
                                 )}
                               </div>
                             </div>
                           ))
                         ) : (
                           <div className="text-center py-4">
-                            <p className="text-sm text-gray-500">Aucun relancement enregistré</p>
+                            <p className="text-sm text-gray-500">
+                              Aucun relancement enregistré
+                            </p>
                           </div>
                         )}
                       </div>
@@ -273,7 +331,8 @@ function Payments() {
                   <div className="flex">
                     <ExclamationTriangleIcon className="h-5 w-5 text-yellow-600 mr-2" />
                     <p className="text-sm text-yellow-700">
-                      Si ce paiement ne concerne pas votre service, merci d'indiquer les coordonnées de la personne à contacter.
+                      Si ce paiement ne concerne pas votre service, merci
+                      d'indiquer les coordonnées de la personne à contacter.
                     </p>
                   </div>
                 </div>
@@ -295,7 +354,7 @@ function Payments() {
                 <p className="text-sm text-red-700">{formError}</p>
               </div>
             )}
-            <form onSubmit={() => null} className="space-y-4">
+            <form onSubmit={(e) => e.preventDefault()} className="space-y-4">
               <div>
                 <label className="block text-sm font-medium text-gray-700 mb-1">
                   Email du contact
@@ -307,7 +366,9 @@ function Payments() {
                   <input
                     type="email"
                     value={contactInfo.email}
-                    onChange={(e) => setContactInfo({...contactInfo, email: e.target.value})}
+                    onChange={(e) =>
+                      setContactInfo({ ...contactInfo, email: e.target.value })
+                    }
                     className="pl-10 block w-full rounded-md border-gray-300 shadow-sm focus:ring-void focus:border-void sm:text-sm"
                     placeholder="exemple@entreprise.com"
                   />
@@ -325,7 +386,9 @@ function Payments() {
                   <input
                     type="tel"
                     value={contactInfo.phone}
-                    onChange={(e) => setContactInfo({...contactInfo, phone: e.target.value})}
+                    onChange={(e) =>
+                      setContactInfo({ ...contactInfo, phone: e.target.value })
+                    }
                     className="pl-10 block w-full rounded-md border-gray-300 shadow-sm focus:ring-void focus:border-void sm:text-sm"
                     placeholder="+33 6 12 34 56 78"
                   />
@@ -338,7 +401,9 @@ function Payments() {
                 </label>
                 <textarea
                   value={contactInfo.comment}
-                  onChange={(e) => setContactInfo({...contactInfo, comment: e.target.value})}
+                  onChange={(e) =>
+                    setContactInfo({ ...contactInfo, comment: e.target.value })
+                  }
                   rows={3}
                   className="block w-full rounded-md border-gray-300 shadow-sm focus:ring-void focus:border-void sm:text-sm"
                   placeholder="Informations complémentaires..."
@@ -365,7 +430,7 @@ function Payments() {
         </div>
       )}
     </>
-  )
+  );
 }
 
-export default Payments 
+export default Payments;

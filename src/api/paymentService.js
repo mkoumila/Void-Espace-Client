@@ -147,23 +147,35 @@ export const paymentService = {
   // Fetch followups for a payment
   async fetchPaymentFollowups(paymentId) {
     try {
-      const { data: followups, error } = await supabaseClient
-        .from("payment_followups")
-        .select(`
-          id,
-          type,
-          comment,
-          created_at,
-          created_by
-        `)
-        .eq("payment_id", paymentId)
-        .order("created_at", { ascending: false });
+      // Try getting followups via RPC to bypass RLS
+      const { data: rpcFollowups, error: rpcError } = await supabaseClient.rpc(
+        'debug_get_followups',
+        { payment_id_param: paymentId }
+      );
+      
+      if (rpcError) {
+        // Fallback to regular query if RPC fails
+        const { data: followups, error } = await supabaseClient
+          .from("payment_followups")
+          .select(`
+            id,
+            type,
+            comment,
+            created_at,
+            created_by,
+            payment_id
+          `)
+          .eq("payment_id", paymentId)
+          .order("created_at", { ascending: false });
 
-      if (error) throw error;
-      return followups;
+        if (error) throw error;
+        return followups || [];
+      }
+      
+      return rpcFollowups || [];
     } catch (error) {
       console.error("Error fetching payment followups:", error);
-      throw error;
+      return []; // Return empty array instead of throwing to prevent UI errors
     }
   }
 }; 

@@ -158,28 +158,26 @@ CREATE TABLE IF NOT EXISTS payment_followups (
 -- Enable RLS on payment_followups table
 ALTER TABLE payment_followups ENABLE ROW LEVEL SECURITY;
 
--- Create policies for payment_followups
-CREATE POLICY "Users can view their own payment followups"
-  ON payment_followups FOR SELECT
-  USING (
-    EXISTS (
-      SELECT 1 FROM payments p
-      JOIN clients c ON p.client_id = c.id
-      WHERE p.id = payment_followups.payment_id
-      AND c.user_id = auth.uid()
-    )
-  );
+-- Drop existing policies for payment_followups
+DROP POLICY IF EXISTS "Users can view their own payment followups" ON payment_followups;
+DROP POLICY IF EXISTS "Users can create payment followups" ON payment_followups;
 
-CREATE POLICY "Users can create payment followups"
+-- Create new policies for payment_followups
+CREATE POLICY "Admins and gestionnaires can view all payment followups"
+  ON payment_followups FOR SELECT
+  USING (is_gestionnaire_or_admin() = TRUE);
+
+CREATE POLICY "Admins and gestionnaires can create payment followups"
   ON payment_followups FOR INSERT
-  WITH CHECK (
-    EXISTS (
-      SELECT 1 FROM payments p
-      JOIN clients c ON p.client_id = c.id
-      WHERE p.id = payment_followups.payment_id
-      AND c.user_id = auth.uid()
-    )
-  );
+  WITH CHECK (is_gestionnaire_or_admin() = TRUE);
+
+CREATE POLICY "Admins and gestionnaires can update payment followups"
+  ON payment_followups FOR UPDATE
+  USING (is_gestionnaire_or_admin() = TRUE);
+
+CREATE POLICY "Admins can delete payment followups"
+  ON payment_followups FOR DELETE
+  USING (is_admin() = TRUE);
 
 -- Quote Followups Table
 CREATE TABLE IF NOT EXISTS quote_followups (
@@ -194,28 +192,26 @@ CREATE TABLE IF NOT EXISTS quote_followups (
 -- Enable RLS on quote_followups table
 ALTER TABLE quote_followups ENABLE ROW LEVEL SECURITY;
 
--- Create policies for quote_followups
-CREATE POLICY "Users can view their own quote followups"
-  ON quote_followups FOR SELECT
-  USING (
-    EXISTS (
-      SELECT 1 FROM quotes q
-      JOIN clients c ON q.client_id = c.id
-      WHERE q.id = quote_followups.quote_id
-      AND c.user_id = auth.uid()
-    )
-  );
+-- Drop existing policies for quote_followups
+DROP POLICY IF EXISTS "Users can view their own quote followups" ON quote_followups;
+DROP POLICY IF EXISTS "Users can create quote followups" ON quote_followups;
 
-CREATE POLICY "Users can create quote followups"
+-- Create new policies for quote_followups
+CREATE POLICY "Admins and gestionnaires can view all quote followups"
+  ON quote_followups FOR SELECT
+  USING (is_gestionnaire_or_admin() = TRUE);
+
+CREATE POLICY "Admins and gestionnaires can create quote followups"
   ON quote_followups FOR INSERT
-  WITH CHECK (
-    EXISTS (
-      SELECT 1 FROM quotes q
-      JOIN clients c ON q.client_id = c.id
-      WHERE q.id = quote_followups.quote_id
-      AND c.user_id = auth.uid()
-    )
-  );
+  WITH CHECK (is_gestionnaire_or_admin() = TRUE);
+
+CREATE POLICY "Admins and gestionnaires can update quote followups"
+  ON quote_followups FOR UPDATE
+  USING (is_gestionnaire_or_admin() = TRUE);
+
+CREATE POLICY "Admins can delete quote followups"
+  ON quote_followups FOR DELETE
+  USING (is_admin() = TRUE);
 
 -- ==========================================
 -- AUTO-ADD USERS FROM AUTH SIGNUP
@@ -380,6 +376,27 @@ EXCEPTION WHEN OTHERS THEN
   RETURN FALSE;
 END;
 $$ LANGUAGE plpgsql SECURITY DEFINER;
+
+-- Function that bypasses RLS to get payment followups
+CREATE OR REPLACE FUNCTION debug_get_followups(payment_id_param UUID)
+RETURNS TABLE (
+  id UUID,
+  payment_id UUID,
+  type TEXT,
+  comment TEXT,
+  created_at TIMESTAMPTZ,
+  created_by UUID
+) AS $$
+BEGIN
+  RETURN QUERY SELECT pf.id, pf.payment_id, pf.type, pf.comment, pf.created_at, pf.created_by 
+  FROM payment_followups pf
+  WHERE pf.payment_id = payment_id_param
+  ORDER BY pf.created_at DESC;
+END;
+$$ LANGUAGE plpgsql SECURITY DEFINER;
+
+-- Grant execute permissions
+GRANT EXECUTE ON FUNCTION debug_get_followups(UUID) TO authenticated;
 
 -- ==========================================
 -- ROW LEVEL SECURITY POLICIES
@@ -1394,14 +1411,29 @@ CREATE TABLE IF NOT EXISTS pv_followups (
 -- Add RLS policies for pv_followups
 ALTER TABLE pv_followups ENABLE ROW LEVEL SECURITY;
 
-CREATE POLICY "Users can view their own pv followups"
-  ON pv_followups FOR SELECT
-  USING (created_by = auth.uid());
+-- Drop existing policy
+DROP POLICY IF EXISTS "Users can view their own pv followups" ON pv_followups;
 
-CREATE POLICY "Users can create pv followups"
-  ON pv_followups FOR INSERT
-  WITH CHECK (created_by = auth.uid());
+-- Create new policy that allows users to view followups for their PVs
+CREATE POLICY "Users can view pv followups"
+  ON pv_followups FOR SELECT
+  USING (
+    EXISTS (
+      SELECT 1 FROM pv
+      JOIN clients ON pv.client_id = clients.id
+      WHERE pv.id = pv_followups.pv_id
+      AND (
+        clients.user_id = auth.uid()
+        OR EXISTS (
+          SELECT 1 FROM users
+          WHERE users.id = auth.uid()
+          AND users.role IN ('admin', 'gestionnaire')
+        )
+      )
+    )
+  );
 
 -- Add indexes for pv_followups
 CREATE INDEX IF NOT EXISTS idx_pv_followups_pv_id ON pv_followups(pv_id);
 CREATE INDEX IF NOT EXISTS idx_pv_followups_created_by ON pv_followups(created_by);
+
