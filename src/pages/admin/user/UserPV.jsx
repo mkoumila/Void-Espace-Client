@@ -97,7 +97,6 @@ function UserPV() {
 
         // Format PVs for display
         const formattedPVs = pvData.map(pv => {
-          console.log("Raw PV data:", pv); // Debug log
           return {
             id: pv.id,
             title: pv.title,
@@ -114,7 +113,6 @@ function UserPV() {
           };
         });
 
-        console.log("Formatted PVs:", formattedPVs); // Debug log
         setPVs(formattedPVs);
       } catch (err) {
         console.error('Error loading data:', err);

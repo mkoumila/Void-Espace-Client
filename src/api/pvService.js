@@ -92,11 +92,8 @@ export const fetchUserPVs = async (userId) => {
 
   if (error) throw error;
 
-  console.log("Raw PV data from database:", data); // Log raw data
-
   // Transform data to include camelCase keys
   const transformedData = transformToCamelCase(data);
-  console.log("Transformed PV data (with camelCase):", transformedData);
 
   // Fetch user information separately, but only for valid user IDs
   if (transformedData && transformedData.length > 0) {
@@ -117,7 +114,6 @@ export const fetchUserPVs = async (userId) => {
             userData.find(u => u.id === (pv.created_by || pv.createdBy)) : null
         }));
         
-        console.log("Enriched PV data with user info:", enrichedData); // Log enriched data
         return enrichedData;
       }
     }
@@ -278,8 +274,6 @@ export const downloadPVFile = async (filePath) => {
     if (!filePath) {
       throw new Error("Aucun fichier spécifié");
     }
-
-    console.log("Attempting to download file:", filePath);
 
     // Try to download from Supabase storage
     const { data, error } = await supabaseClient

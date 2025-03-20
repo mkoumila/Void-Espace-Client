@@ -33,14 +33,6 @@ function SignaturePV() {
     if (currentUser?.id) {
       loadPVs(currentUser.id)
       migrateLocalStorageFilesToSupabase()
-      
-      // Debug localStorage
-      const allKeys = Object.keys(localStorage);
-      console.log("On component mount - All localStorage keys:", allKeys);
-      
-      // Filter for signed PV keys
-      const signedPvKeys = allKeys.filter(key => key.startsWith('signed_pv_'));
-      console.log("Signed PV keys in localStorage:", signedPvKeys);
     }
   }, [currentUser])
 
@@ -75,7 +67,6 @@ function SignaturePV() {
       }
       
       const data = await fetchUserPVs(userId)
-      console.log("PVs loaded:", data); // Log all PVs for debugging
       
       // Map data to ensure consistent field names
       const processedData = data.map(pv => {
@@ -92,6 +83,7 @@ function SignaturePV() {
       
       setPVs(processedData)
     } catch (err) {
+      console.error('Error loading data:', err);
       setError(err.message || "Une erreur est survenue lors du chargement des documents")
     } finally {
       setLoading(false)
@@ -166,8 +158,6 @@ function SignaturePV() {
         return;
       }
       
-      console.log("Downloading file from Supabase storage:", filePath);
-      
       // Check if this is a legacy localStorage path (from older implementation)
       if (filePath.startsWith('local_signed_')) {
         alert("Ce fichier doit être téléversé à nouveau car il était stocké dans une ancienne version du système. Veuillez le téléverser à nouveau.");
@@ -188,11 +178,9 @@ function SignaturePV() {
             
           if (!bucketError && data) {
             downloadUrl = data.signedUrl;
-            console.log(`File found in bucket '${bucket}'`);
             break;
           }
         } catch (err) {
-          console.log(`Failed to get file from bucket '${bucket}':`, err.message);
           // Continue to the next bucket
         }
       }
@@ -216,11 +204,8 @@ function SignaturePV() {
       const signedPvKeys = allKeys.filter(key => key.startsWith('signed_pv_local_signed_'));
       
       if (signedPvKeys.length === 0) {
-        console.log("No localStorage files to migrate");
         return;
       }
-      
-      console.log("Found localStorage files to migrate:", signedPvKeys.length);
       
       // For each localStorage item, extract PV ID and migrate to Supabase
       for (const key of signedPvKeys) {
@@ -230,7 +215,6 @@ function SignaturePV() {
           const pvIdMatch = localPathKey.match(/local_signed_([^_]+)_/);
           
           if (!pvIdMatch || !pvIdMatch[1]) {
-            console.log("Could not extract PV ID from key:", key);
             continue;
           }
           
@@ -238,40 +222,26 @@ function SignaturePV() {
           const base64Data = localStorage.getItem(key);
           
           if (!base64Data) {
-            console.log("No data found for key:", key);
             continue;
           }
-          
-          console.log("Migrating file for PV:", pvId);
           
           // Convert base64 to file
           const base64Response = await fetch(base64Data);
           const blob = await base64Response.blob();
           const file = new File([blob], `migrated_${pvId}.pdf`, { type: 'application/pdf' });
           
-          // Find the PV in state
-          const pv = pvs.find(p => p.id === pvId);
-          if (!pv) {
-            console.log("Could not find PV with ID:", pvId);
-            continue;
-          }
-          
-          // Upload to Supabase using the normal upload function
+          // Upload to Supabase
           await uploadSignedPVFile(file, pvId);
           
-          // Remove the localStorage item
+          // Remove from localStorage after successful migration
           localStorage.removeItem(key);
-          console.log("Migration complete for PV:", pvId);
-        } catch (error) {
-          console.error("Error migrating file:", error);
+        } catch (err) {
+          console.error('Error migrating file:', err);
+          // Continue with next file even if one fails
         }
       }
-      
-      // Reload PVs after migration
-      await loadPVs(currentUser.id);
-      
-    } catch (error) {
-      console.error("Error in migration process:", error);
+    } catch (err) {
+      console.error('Error in migration:', err);
     }
   };
 
@@ -296,7 +266,6 @@ function SignaturePV() {
         }
       });
       
-      console.log('Storage cleanup completed');
     };
     
     cleanupStorage();
