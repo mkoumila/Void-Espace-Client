@@ -704,25 +704,25 @@ CREATE POLICY "Anyone authenticated can view files from pv_files"
     bucket_id = 'pv_files' AND auth.role() = 'authenticated'
   );
 
-CREATE POLICY "Admins can upload files to pv_files"
+CREATE POLICY "Authenticated users can upload files to pv_files"
   ON storage.objects FOR INSERT
   WITH CHECK (
     bucket_id = 'pv_files'
-    AND is_admin() = TRUE
+    AND auth.role() = 'authenticated'
   );
 
-CREATE POLICY "Admins can update files in pv_files"
+CREATE POLICY "Authenticated users can update their files in pv_files"
   ON storage.objects FOR UPDATE
   USING (
     bucket_id = 'pv_files'
-    AND is_admin() = TRUE
+    AND auth.role() = 'authenticated'
   );
 
-CREATE POLICY "Admins can delete files from pv_files"
+CREATE POLICY "Authenticated users can delete their files from pv_files"
   ON storage.objects FOR DELETE
   USING (
     bucket_id = 'pv_files'
-    AND is_admin() = TRUE
+    AND auth.role() = 'authenticated'
   );
 
 -- PROJECT FILES POLICIES
